@@ -1,42 +1,45 @@
 # Slate fork of Shizuku
 
 This repository is a fork of [Shizuku](https://github.com/RikkaApps/Shizuku) v13.6.0 (Apache-2.0)
-with a small, self-contained addition: a component audit and management UI.
+with a component audit and management UI.
 
-Everything else is upstream Shizuku and is unmodified.
+The app is **client-only**: it requires the official Shizuku app (`moe.shizuku.privileged.api`)
+to provide the shell channel. The upstream server/starter modules stay in the tree for reference,
+but they are not part of the shipped build.
 
 ## What was changed
 
-Two commits:
-
-1. `Import Shizuku v13.6.0 upstream` — pristine upstream source.
-2. `Add Slate UI, shell service and rebrand` — the following files:
+Most of the UI lives in `manager/src/slate` (compiled instead of `manager/src/main`):
 
 | File | Purpose |
 |---|---|
-| `manager/src/main/java/moe/shizuku/manager/phonefix/PhoneFixActivity.kt` | Five-screen UI: Home, Components, Record, Settings, About |
-| `manager/src/main/java/moe/shizuku/manager/phonefix/ShellService.kt` | AIDL user service executed as shell |
-| `manager/src/main/aidl/moe/shizuku/manager/phonefix/IShellService.aidl` | Interface for the above |
-| `manager/src/main/res/drawable/ic_slate.xml` | App icon |
-| `manager/src/main/AndroidManifest.xml` | Launcher activity, label/icon, `QUERY_ALL_PACKAGES` |
-| `manager/build.gradle` | Enable AIDL |
+| `manager/src/slate/java/.../PhoneFixActivity.kt` | Five-screen UI: Home, Components, Record, Settings, About |
+| `manager/src/slate/java/.../ShellService.kt` | AIDL user service executed as shell |
+| `manager/src/slate/java/.../SlateProvider.kt` | Receives the Shizuku binder |
+| `manager/src/slate/java/.../RegisterHelperClient.kt` | Experimental serverAddress redirect |
+| `manager/src/slate/java/.../NetBlockVpnService.kt` | Optional per-app VPN network block |
+| `manager/src/slate/AndroidManifest.xml` | Launcher activity, provider, services, VPN service |
+| `manager/build.gradle` | Client-only source sets, signing fallback |
 
 The app label is "Slate". The application id is `io.github.ivankwanpn.slate`, so Slate can be installed alongside the real Shizuku instead of replacing it.
 
 ## Build
 
 ```
-./gradlew :manager:assembleDebug
+./gradlew :manager:assembleRelease
 ```
 
-Requires JDK 21, Android SDK 36 and NDK 29 (upstream requirements).
+Requires JDK 21, Android SDK 36 and the `api` submodule (Shizuku-API).
 
 ## Relation to the main repository
 
-Research report, Windows auditor, standalone audit app and the patch:
+Research report, Windows auditor, standalone audit app and the historical patch:
 https://github.com/ivankwanpn/slate
 
-The patch in that repository (`patches/slate-fork.patch`) is the same change set as the second commit here.
+The patch in that repository (`patches/slate-fork.patch`) is an early snapshot and may lag behind
+this fork. The source of truth for the Android app is this repository.
+
+Releases: https://github.com/ivankwanpn/slate-fork/releases/latest
 
 ## Rebrand (2026-11)
 
@@ -88,6 +91,33 @@ reference, but `manager` now compiles `manager/src/slate` only:
 
 The bundled-server flow could not pair over wireless debugging on the target device, which is why
 the client split was made.
+
+## Current features (v0.3.7)
+
+- Scans carrier DM / registration components: `com.mobiletools.systemhelper`,
+  `com.vivo.devicereg` and related names.
+- Package states: running / disabled / uninstalled (with `cmd package install-existing` restore).
+- Runtime permission switches (ON = granted), AppOps `GET_USAGE_STATS`, install-time permissions
+  collapsed behind a toggle.
+- Snapshot of granted permissions before revoke, exact restore from that snapshot.
+- `netpolicy` background restriction for metered data:
+
+  ```
+  cmd netpolicy add restrict-background-blacklist <uid>
+  cmd netpolicy list restrict-background-blacklist
+  ```
+
+  Querying uses `cmd netpolicy list`, not `dumpsys netpolicy` (vivo does not print the word
+  "blacklist" there).
+- Optional per-app VPN network block for foreground + Wi-Fi + mobile data. It takes the single
+  VPN slot, so it conflicts with proxy VPNs; it is off by default, never auto-starts and warns
+  before enabling.
+- Experimental `serverAddress` redirect for SystemHelper, with a record of the last written value
+  (the app has no getter and its private prefs are unreadable without root).
+- Dark mode, status labels, async scan/commands with progress dialogs.
+
+Research details: [slate/docs/HARDENING.md](https://github.com/ivankwanpn/slate/blob/master/docs/HARDENING.md)
+and [slate/docs/DEVICEREG.md](https://github.com/ivankwanpn/slate/blob/master/docs/DEVICEREG.md).
 
 ## License
 
