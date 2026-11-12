@@ -16,10 +16,12 @@ import android.view.Gravity
 import android.view.View
 import android.widget.Button
 import android.widget.EditText
+import android.widget.ImageView
 import android.widget.Switch
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import moe.shizuku.manager.R
 import android.widget.TextView
 import rikka.shizuku.Shizuku
 import java.text.SimpleDateFormat
@@ -294,9 +296,13 @@ class PhoneFixActivity : Activity() {
     private fun buildNav() {
         navBar.removeAllViews()
         val items = listOf(
-            "🏠" to "首頁", "📦" to "元件", "🧾" to "記錄", "⚙️" to "設定", "ℹ️" to "說明"
+            R.drawable.ic_nav_home to "首頁",
+            R.drawable.ic_nav_apps to "元件",
+            R.drawable.ic_nav_log to "記錄",
+            R.drawable.ic_nav_settings to "設定",
+            R.drawable.ic_nav_info to "說明"
         )
-        items.forEachIndexed { i, (icon, name) ->
+        items.forEachIndexed { i, (iconRes, name) ->
             val item = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
@@ -307,8 +313,18 @@ class PhoneFixActivity : Activity() {
                 }
                 setOnClickListener { tab = i; showTab(i) }
             }
-            item.addView(label(icon, 17f, if (i == tab) accent else muted))
-            item.addView(label(name, 10.5f, if (i == tab) accent else muted, i == tab))
+            val tint = if (i == tab) accent else muted
+            val iconView = ImageView(this).apply {
+                setImageResource(iconRes)
+                setColorFilter(tint)
+                layoutParams = LinearLayout.LayoutParams(dp(22), dp(22))
+            }
+            val nameView = label(name, 10.5f, tint, i == tab).apply {
+                gravity = Gravity.CENTER
+                layoutParams = LinearLayout.LayoutParams(-1, -2)
+            }
+            item.addView(iconView)
+            item.addView(nameView)
             navBar.addView(item, LinearLayout.LayoutParams(0, -1, 1f).apply {
                 setMargins(dp(2), dp(2), dp(2), dp(2))
             })
