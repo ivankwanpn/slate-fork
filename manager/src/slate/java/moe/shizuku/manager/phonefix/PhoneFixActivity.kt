@@ -360,19 +360,37 @@ class PhoneFixActivity : Activity() {
         gap(acts, 6)
         acts.addView(action("撤銷敏感權限（保守）") {
             confirm("撤銷定位、電話狀態、儲存、相機、麥克風、聯絡人與使用統計；不會動 SMS／藍牙。") {
+                saveSnapshot(p)
                 runAll(buildPermissionCommands(p, false), p.name)
             }
         })
         gap(acts, 6)
         acts.addView(action("撤銷敏感權限（含 SMS／藍牙）") {
             confirm("額外撤銷 SEND_SMS、BLUETOOTH_SCAN/CONNECT；可能影響電信自動註冊與藍牙功能。") {
+                saveSnapshot(p)
                 runAll(buildPermissionCommands(p, true), p.name)
             }
         })
         gap(acts, 6)
+        val snapshot = loadSnapshot(p)
+        if (snapshot != null) {
+            acts.addView(label(
+                "撤銷前快照：${snapshot.first.size} 項（" +
+                    SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date(snapshot.second)) + "）",
+                11f, muted
+            ))
+            gap(acts, 6)
+        }
         acts.addView(action("還原權限（grant + appops default）") {
-            confirm("把這個套件 requested 的 runtime 權限全部 grant 回來，AppOps 設回 default；會恢復它原本的採集能力。") {
-                runAll(buildRestoreCommands(p), p.name)
+            val granted = snapshot?.first
+            val message = if (granted != null) {
+                "將只 grant 撤銷前已授予的 ${granted.size} 項權限，AppOps 設回 default。"
+            } else {
+                "找不到撤銷前快照，將 grant 全部 requested 的 runtime 權限（可能多授權）。"
+            }
+            confirm(message) {
+                val perms = granted ?: p.requested.filter { isDangerousPermission(it) }
+                runAll(buildRestoreCommands(p, perms), p.name)
             }
         })
         if (p.name == "com.vivo.devicereg") {
@@ -603,9 +621,49 @@ class PhoneFixActivity : Activity() {
         return cmds
     }
 
-    private fun buildRestoreCommands(p: Pkg): List<String> {
+    private fun snapshotPrefs() =
+        getSharedPreferences("slate_perm_snapshots", MODE_PRIVATE)
+
+    private fun currentGrantedDangerous(p: Pkg): List<String> {
+        val out = mutableListOf<String>()
+        for (perm in p.requested) {
+            if (!isDangerousPermission(perm)) continue
+            val granted = try {
+                packageManager.checkPermission(perm, p.name) ==
+                    android.content.pm.PackageManager.PERMISSION_GRANTED
+            } catch (t: Throwable) {
+                false
+            }
+            if (granted) out.add(perm)
+        }
+        return out
+    }
+
+    private fun saveSnapshot(p: Pkg) {
+        val granted = currentGrantedDangerous(p)
+        val arr = org.json.JSONArray()
+        for (perm in granted) arr.put(perm)
+        snapshotPrefs().edit()
+            .putString(p.name, arr.toString())
+            .putLong(p.name + ".time", System.currentTimeMillis())
+            .apply()
+    }
+
+    private fun loadSnapshot(p: Pkg): Pair<List<String>, Long>? {
+        val raw = snapshotPrefs().getString(p.name, null) ?: return null
+        return try {
+            val arr = org.json.JSONArray(raw)
+            val list = mutableListOf<String>()
+            for (i in 0 until arr.length()) list.add(arr.getString(i))
+            list to snapshotPrefs().getLong(p.name + ".time", 0L)
+        } catch (t: Throwable) {
+            null
+        }
+    }
+
+    private fun buildRestoreCommands(p: Pkg, perms: List<String>): List<String> {
         val cmds = mutableListOf<String>()
-        val perms = p.requested.filter { isDangerousPermission(it) }.sortedBy {
+        val ordered = perms.sortedBy {
             when (it) {
                 "android.permission.ACCESS_FINE_LOCATION" -> 0
                 "android.permission.ACCESS_COARSE_LOCATION" -> 1
@@ -613,7 +671,7 @@ class PhoneFixActivity : Activity() {
                 else -> 2
             }
         }
-        for (perm in perms) {
+        for (perm in ordered) {
             cmds.add("pm grant " + p.name + " " + perm)
         }
         for (op in conservativeAppOps + extraAppOps) {
