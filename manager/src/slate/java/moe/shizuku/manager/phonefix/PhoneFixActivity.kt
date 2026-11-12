@@ -578,7 +578,7 @@ class PhoneFixActivity : Activity() {
 
     private fun isDangerousPermission(perm: String): Boolean = try {
         val info = packageManager.getPermissionInfo(perm, 0)
-        (info.protectionLevel and 0xf) == android.content.pm.PackageManager.PROTECTION_DANGEROUS
+        (info.protectionLevel and 0xf) == android.content.pm.PermissionInfo.PROTECTION_DANGEROUS
     } catch (t: Throwable) {
         false
     }
