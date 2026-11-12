@@ -353,21 +353,29 @@ class PhoneFixActivity : Activity() {
             }
         })
         gap(acts, 6)
-        acts.addView(action("撤銷敏感權限") {
-            confirm("保留應用程式，但收回定位、電話狀態、使用統計與儲存權限。") {
-                val cmds = listOf(
-                    "pm revoke " + p.name + " android.permission.ACCESS_FINE_LOCATION",
-                    "pm revoke " + p.name + " android.permission.ACCESS_COARSE_LOCATION",
-                    "pm revoke " + p.name + " android.permission.READ_PHONE_STATE",
-                    "pm revoke " + p.name + " android.permission.READ_EXTERNAL_STORAGE",
-                    "cmd appops set " + p.name + " FINE_LOCATION ignore",
-                    "cmd appops set " + p.name + " COARSE_LOCATION ignore",
-                    "cmd appops set " + p.name + " READ_PHONE_STATE ignore",
-                    "cmd appops set " + p.name + " GET_USAGE_STATS ignore"
-                )
-                runAll(cmds, p.name)
+        acts.addView(label(
+            "只撤 runtime 權限；INTERNET、QUERY_ALL_PACKAGES、READ_PRIVILEGED_PHONE_STATE 這類安裝時權限撤不掉，GET_USAGE_STATS 改用 AppOps 攔。",
+            11f, muted
+        ))
+        gap(acts, 6)
+        acts.addView(action("撤銷敏感權限（保守）") {
+            confirm("撤銷定位、電話狀態、儲存、相機、麥克風、聯絡人與使用統計；不會動 SMS／藍牙。") {
+                runAll(buildPermissionCommands(p, false), p.name)
             }
         })
+        gap(acts, 6)
+        acts.addView(action("撤銷敏感權限（含 SMS／藍牙）") {
+            confirm("額外撤銷 SEND_SMS、BLUETOOTH_SCAN/CONNECT；可能影響電信自動註冊與藍牙功能。") {
+                runAll(buildPermissionCommands(p, true), p.name)
+            }
+        })
+        if (p.name == "com.vivo.devicereg") {
+            gap(acts, 6)
+            acts.addView(label(
+                "DeviceReg：撤定位可讓 Wi-Fi／基地台採集變空；GET_USAGE_STATS 可讓使用時長／流量變空；SMS／藍牙撤銷可能影響電信註冊。",
+                11f, warn
+            ))
+        }
         box.addView(acts)
         if (p.name == RegisterHelperClient.TARGET_PACKAGE) {
             gap(box, 12)
@@ -545,6 +553,48 @@ class PhoneFixActivity : Activity() {
             "不連線到任何伺服器、不上傳資料；操作記錄只存在本次執行期間的記憶體中。", 13f, muted))
         box.addView(privacy)
         return scroll(box)
+    }
+
+    // ---------- permission hardening ----------
+
+    private val conservativeAppOps = listOf(
+        "FINE_LOCATION", "COARSE_LOCATION", "READ_PHONE_STATE", "READ_CONTACTS",
+        "READ_CALL_LOG", "READ_CALENDAR", "CAMERA", "RECORD_AUDIO",
+        "READ_EXTERNAL_STORAGE", "WRITE_EXTERNAL_STORAGE", "GET_USAGE_STATS",
+        "ACTIVITY_RECOGNITION", "BODY_SENSORS"
+    )
+
+    private val extraAppOps = listOf(
+        "SEND_SMS", "RECEIVE_SMS", "READ_SMS", "BLUETOOTH_SCAN", "BLUETOOTH_CONNECT"
+    )
+
+    private val skipInConservative = setOf(
+        "android.permission.SEND_SMS",
+        "android.permission.RECEIVE_SMS",
+        "android.permission.READ_SMS",
+        "android.permission.BLUETOOTH_SCAN",
+        "android.permission.BLUETOOTH_CONNECT"
+    )
+
+    private fun isDangerousPermission(perm: String): Boolean = try {
+        val info = packageManager.getPermissionInfo(perm, 0)
+        (info.protectionLevel and 0xf) == android.content.pm.PackageManager.PROTECTION_DANGEROUS
+    } catch (t: Throwable) {
+        false
+    }
+
+    private fun buildPermissionCommands(p: Pkg, includeSmsBluetooth: Boolean): List<String> {
+        val cmds = mutableListOf<String>()
+        for (perm in p.granted) {
+            if (!includeSmsBluetooth && perm in skipInConservative) continue
+            if (!isDangerousPermission(perm)) continue
+            cmds.add("pm revoke " + p.name + " " + perm)
+        }
+        val ops = if (includeSmsBluetooth) conservativeAppOps + extraAppOps else conservativeAppOps
+        for (op in ops) {
+            cmds.add("cmd appops set " + p.name + " " + op + " ignore")
+        }
+        return cmds
     }
 
     // ---------- actions ----------
