@@ -19,22 +19,22 @@
         android:required="false" />
 
     <permission-group
-        android:name="moe.shizuku.manager.permission-group.API"
+        android:name="io.github.ivankwanpn.slate.permission-group.API"
         android:description="@string/permission_group_description"
         android:icon="@drawable/ic_system_icon"
         android:label="@string/permission_group_label" />
 
     <permission
-        android:name="moe.shizuku.manager.permission.MANAGER"
+        android:name="io.github.ivankwanpn.slate.permission.MANAGER"
         android:protectionLevel="signature" />
-    <uses-permission android:name="moe.shizuku.manager.permission.MANAGER" />
+    <uses-permission android:name="io.github.ivankwanpn.slate.permission.MANAGER" />
 
     <permission
-        android:name="moe.shizuku.manager.permission.API_V23"
+        android:name="io.github.ivankwanpn.slate.permission.API_V23"
         android:description="@string/permission_description"
         android:icon="@drawable/ic_system_icon"
         android:label="@string/permission_label"
-        android:permissionGroup="moe.shizuku.manager.permission-group.API"
+        android:permissionGroup="io.github.ivankwanpn.slate.permission-group.API"
         android:protectionLevel="dangerous" />
     <uses-permission
         android:name="moe.shizuku.manager.permission.API_V23"
@@ -58,7 +58,7 @@
         android:enableOnBackInvokedCallback="true"
         android:fullBackupContent="@xml/backup_descriptor"
         android:icon="@drawable/ic_slate"
-        android:label="Slate"
+        android:label="@string/app_name"
         android:localeConfig="@xml/locales_config"
         android:supportsRtl="true"
         android:theme="@style/AppTheme"
@@ -119,7 +119,7 @@
             android:name=".legacy.LegacyIsNotSupportedActivity"
             android:excludeFromRecents="true"
             android:exported="true"
-            android:permission="moe.shizuku.manager.permission.API"
+            android:permission="io.github.ivankwanpn.slate.permission.API"
             android:theme="@style/GrantPermissions">
             <intent-filter>
                 <action android:name="${applicationId}.intent.action.REQUEST_AUTHORIZATION" />
@@ -169,7 +169,7 @@
         <activity
             android:name=".phonefix.PhoneFixActivity"
             android:exported="true"
-            android:label="PhoneFix">
+            android:label="@string/app_name">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

@@ -21,7 +21,7 @@ Two commits:
 | `manager/src/main/AndroidManifest.xml` | Launcher activity, label/icon, `QUERY_ALL_PACKAGES` |
 | `manager/build.gradle` | Enable AIDL |
 
-The app label is "Slate". The application id remains `moe.shizuku.privileged.api` for now.
+The app label is "Slate". The application id is `io.github.ivankwanpn.slate`, so Slate can be installed alongside the real Shizuku instead of replacing it.
 
 ## Build
 
@@ -37,6 +37,30 @@ Research report, Windows auditor, standalone audit app and the patch:
 https://github.com/ivankwanpn/slate
 
 The patch in that repository (`patches/slate-fork.patch`) is the same change set as the second commit here.
+
+## Rebrand (2026-11)
+
+Slate is no longer a drop-in replacement for Shizuku: it can be installed next to it.
+
+| Item | Old | New |
+|---|---|---|
+| applicationId | `moe.shizuku.privileged.api` | `io.github.ivankwanpn.slate` |
+| API permission | `moe.shizuku.manager.permission.API_V23` | `io.github.ivankwanpn.slate.permission.API_V23` |
+| manager permission | `moe.shizuku.manager.permission.MANAGER` | `io.github.ivankwanpn.slate.permission.MANAGER` |
+| permission group | `moe.shizuku.manager.permission-group.API` | `io.github.ivankwanpn.slate.permission-group.API` |
+| server process | `shizuku_server` | `slate_server` |
+| launcher label | `PhoneFix` | `Slate` |
+
+The server and starter address the manager by package name (`ServerConstants.MANAGER_APPLICATION_ID`,
+`starter.cpp PACKAGE_NAME`, `ServiceStarter`), and the provider authority is `${applicationId}.shizuku`;
+all of them follow the new id. The server process was renamed so starting Slate does not kill the
+real Shizuku server.
+
+`moe.shizuku.privileged.api.intent.extra.BINDER` is kept as an opaque bundle key; it only has to agree
+between starter, server and manager.
+
+The `api` submodule (Shizuku-API) still carries the upstream constants in `ShizukuProvider`; they are
+unused by this app. If third-party clients are added later, that submodule needs the same rename.
 
 ## License
 
