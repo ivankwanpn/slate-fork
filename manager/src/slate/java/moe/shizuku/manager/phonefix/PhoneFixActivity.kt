@@ -522,14 +522,15 @@ class PhoneFixActivity : Activity() {
             "1. com.mobiletools.systemhelper 是中國聯通的終端管理組件。它會讀取裝置與 SIM 識別碼、基地台、位置與已安裝應用清單，並以明文 HTTP 上報。\n\n" +
             "2. 該元件對外開放一個沒有權限保護的 Binder 服務。任何應用程式都能連上它，改寫上報位址或觸發上報。Slate 在元件詳情頁提供「上報位址」功能，可直接改寫。\n\n" +
             "3. 它的啟用狀態由 vivo 的 daemon 在每次開機時還原。來源是 VivoDaemonService 內的 AppFilter，會依系統屬性把這個元件放進「啟用」清單。\n\n" +
-            "4. 停用、卸載、暫停三種方式都會在重開機後被還原；只有權限與 AppOps 的變更會保留。", 13f, muted))
+            "4. 停用、卸載、暫停三種方式都會在重開機後被還原；只有權限與 AppOps 的變更會保留。\n\n" +
+            "5. 同類的預裝元件還有 com.vivo.devicereg（vivo DeviceReg，內嵌彩訊 DM SDK，會採集應用清單、使用時長、分應用流量、基地台／Wi-Fi 與 SIM 標識，上報到 a.fxltsbl.com）、com.vivo.devicereg2、com.dmclient.debug、com.chinaunicom.registerhelper，以及其他廠商的 com.coloros.regservice、com.miui.dmregservice 等。Slate 的掃描已納入這些關鍵字。", 13f, muted))
         box.addView(found)
 
         gap(box, 12)
         val limits = card()
         limits.addView(label("目前的限制", 15f, ink, true))
         limits.addView(label(
-            "· 重新開機後需要重新啟動服務，這是 Android 的設計，沒有 root 無法繞過。\n" +
+            "· 重新開機後需要在 Shizuku 內重新啟動服務，這是 Android 的設計，沒有 root 無法繞過。\n" +
             "· 無法撤銷安裝時授予的權限（INTERNET、QUERY_ALL_PACKAGES、READ_PRIVILEGED_PHONE_STATE 等）。\n" +
             "· 無法停用其他應用程式的元件，shell 權限不足。\n" +
             "· 不會修改系統分區，也不會 root 或解鎖 bootloader。\n" +
@@ -592,7 +593,11 @@ class PhoneFixActivity : Activity() {
                 android.content.pm.PackageManager.GET_RECEIVERS or
                 android.content.pm.PackageManager.GET_ACTIVITIES or
                 android.content.pm.PackageManager.MATCH_DISABLED_COMPONENTS
-            val keywords = listOf("systemhelper", "mobiletools", "dmreg", "guardprovider", "fanzha", "fraud")
+            val keywords = listOf(
+                "systemhelper", "mobiletools", "devicereg", "dmclient", "regservice",
+                "registerhelper", "ctautoregist", "registration", "ueinfocheck",
+                "autoregsms", "dmreg", "guardprovider", "fanzha", "fraud"
+            )
             for (pi in pm.getInstalledPackages(flags)) {
                 if (keywords.none { pi.packageName.contains(it, true) }) continue
                 val ai = pi.applicationInfo
