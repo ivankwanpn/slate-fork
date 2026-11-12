@@ -1073,6 +1073,64 @@ class PhoneFixActivity : Activity() {
         }
     }
 
+    private fun applyBackground(p: Pkg, allow: Boolean, mode: String): String {
+        val svc = shell ?: return "no shell"
+        if (mode == "appops") {
+            val cmd = "cmd appops set " + p.name + " RUN_ANY_IN_BACKGROUND " +
+                (if (allow) "allow" else "ignore")
+            val out = try {
+                svc.runCommand(cmd)
+            } catch (t: Throwable) {
+                "error: $t"
+            }
+            return "[" + cmd + "]\n" + out
+        }
+        val cmd = "cmd netpolicy " + (if (allow) "remove" else "add") +
+            " restrict-background-blacklist " + p.uid
+        val first = try {
+            svc.runCommand(cmd)
+        } catch (t: Throwable) {
+            "error: $t"
+        }
+        val after = queryBackgroundRestricted(p)
+        if (after == null || after == !allow) {
+            val fallback = "cmd appops set " + p.name + " RUN_ANY_IN_BACKGROUND " +
+                (if (allow) "allow" else "ignore")
+            val second = try {
+                svc.runCommand(fallback)
+            } catch (t: Throwable) {
+                "error: $t"
+            }
+            return "[" + cmd + "]\n" + first + "\n[fallback appops]\n[" + fallback + "]\n" + second
+        }
+        return "[" + cmd + "]\n" + first
+    }
+
+    private fun runBackground(p: Pkg, allow: Boolean) {
+        val dlg = ProgressDialog(this).apply {
+            setMessage("套用背景限制…")
+            setCancelable(false)
+            show()
+        }
+        Thread {
+            val mode = if (queryBackgroundRestricted(p) == null) "appops" else "netpolicy"
+            val out = applyBackground(p, allow, mode)
+            val stamp = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+            logs.add(stamp + "  " + p.name + "\n" + out)
+            runOnUiThread {
+                try {
+                    dlg.dismiss()
+                } catch (t: Throwable) {
+                }
+                AlertDialog.Builder(this)
+                    .setTitle(if (allow) "已解除背景限制" else "已套用背景限制")
+                    .setMessage(out)
+                    .setPositiveButton("好") { _, _ -> detail(p) }
+                    .show()
+            }
+        }.start()
+    }
+
     private fun backgroundSwitchRow(p: Pkg, onChanged: () -> Unit): View {
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -1087,34 +1145,36 @@ class PhoneFixActivity : Activity() {
         sw.isEnabled = false
         row.addView(sw)
         Thread {
-            val restricted = queryBackgroundRestricted(p)
+            val net = queryBackgroundRestricted(p)
+            val appops = if (net == null) appOpsMode(p.name, "RUN_ANY_IN_BACKGROUND") else null
             runOnUiThread {
-                if (restricted == null) {
+                val mode: String
+                val allowed: Boolean
+                if (net != null) {
+                    mode = "netpolicy"
+                    allowed = !net
+                    status.text = if (net) "已限制（netpolicy）" else "不受限"
+                    status.setTextColor(if (net) danger else success)
+                } else if (appops != null) {
+                    mode = "appops"
+                    allowed = appops != "ignore"
+                    status.text = if (allowed) "不受限" else "已限制（背景執行）"
+                    status.setTextColor(if (allowed) success else danger)
+                } else {
                     status.text = "查詢失敗"
                     status.setTextColor(muted)
-                } else {
-                    status.text = if (restricted) "已限制" else "不受限"
-                    status.setTextColor(if (restricted) danger else success)
-                    sw.isChecked = !restricted
-                    sw.isEnabled = true
-                    sw.setOnCheckedChangeListener { button, checked ->
-                        button.isEnabled = false
-                        Thread {
-                            val cmd = if (checked) {
-                                "cmd netpolicy remove restrict-background-blacklist " + p.uid
-                            } else {
-                                "cmd netpolicy add restrict-background-blacklist " + p.uid
-                            }
-                            val out = try {
-                                shell?.runCommand(cmd) ?: "no shell"
-                            } catch (t: Throwable) {
-                                "error: $t"
-                            }
-                            val stamp = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
-                            logs.add(stamp + "  " + cmd + "\n" + out)
-                            runOnUiThread { onChanged() }
-                        }.start()
-                    }
+                    return@runOnUiThread
+                }
+                sw.isChecked = allowed
+                sw.isEnabled = true
+                sw.setOnCheckedChangeListener { button, checked ->
+                    button.isEnabled = false
+                    Thread {
+                        val out = applyBackground(p, checked, mode)
+                        val stamp = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+                        logs.add(stamp + "  " + p.name + "\n" + out)
+                        runOnUiThread { onChanged() }
+                    }.start()
                 }
             }
         }.start()
@@ -1161,14 +1221,14 @@ class PhoneFixActivity : Activity() {
                             noUid()
                         } else {
                             confirm("把 UID " + p.uid + " 加入 restrict-background-blacklist。只影響背景資料，不動 SMS／APN／IMS。") {
-                                run("cmd netpolicy add restrict-background-blacklist " + p.uid, p.name)
+                                runBackground(p, false)
                             }
                         }
                     }
 
                     4 -> {
                         if (p.uid > 0) {
-                            run("cmd netpolicy remove restrict-background-blacklist " + p.uid, p.name)
+                            runBackground(p, true)
                         }
                     }
                 }
