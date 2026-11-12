@@ -438,7 +438,16 @@ class PhoneFixActivity : Activity() {
 
         gap(box, 14)
         val perms = card()
-        perms.addView(sectionTitle("權限"))
+        perms.addView(sectionTitle("權限狀態"))
+        val runtimePerms = p.requested.filter { isDangerousPermission(it) }
+        val grantedNow = runtimePerms.count { isPermissionGranted(p.name, it) }
+        perms.addView(label(
+            "$grantedNow / ${runtimePerms.size} 項 runtime 權限仍授予",
+            12f, if (grantedNow == 0) success else warn, true
+        ))
+        perms.addView(label("開關即時反映目前狀態；切換後會重新整理。", 11f, muted))
+        gap(perms, 8)
+
         val groups = listOf(
             "定位" to listOf("ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION", "ACCESS_BACKGROUND_LOCATION", "ACCESS_MEDIA_LOCATION"),
             "電話" to listOf("READ_PHONE_STATE", "READ_PRECISE_PHONE_STATE", "READ_PRIVILEGED_PHONE_STATE", "CALL_PHONE", "READ_CALL_LOG", "READ_PHONE_NUMBERS"),
@@ -446,28 +455,39 @@ class PhoneFixActivity : Activity() {
             "網路與系統" to listOf("INTERNET", "ACCESS_NETWORK_STATE", "CHANGE_WIFI_STATE", "ACCESS_WIFI_STATE", "QUERY_ALL_PACKAGES", "PACKAGE_USAGE_STATS", "RECEIVE_BOOT_COMPLETED", "SCHEDULE_EXACT_ALARM", "FOREGROUND_SERVICE")
         )
         val req = p.requested.map { it.substringAfterLast('.') }
+        val fullByShort = p.requested.associateBy { it.substringAfterLast('.') }
         val got = p.granted.map { it.substringAfterLast('.') }.toSet()
         val shown = mutableSetOf<String>()
         for ((title, keys) in groups) {
             val rows = req.filter { it in keys }
             if (rows.isEmpty()) continue
             shown.addAll(rows)
-            gap(perms, 8)
-            perms.addView(label(title, 13f, accent, true))
+            perms.addView(label(title, 12.5f, accent, true))
             for (r in rows) {
-                val ok = r in got
-                perms.addView(permRow(r, ok))
+                val full = fullByShort[r]
+                if (full != null && isDangerousPermission(full)) {
+                    perms.addView(permissionSwitchRow(p, full) { detail(p) })
+                } else {
+                    perms.addView(permRow(r, r in got))
+                }
             }
+            gap(perms, 6)
         }
         val rest = req.filter { it !in shown }
         if (rest.isNotEmpty()) {
-            gap(perms, 8)
-            perms.addView(label("其他", 13f, accent, true))
+            perms.addView(label("其他", 12.5f, accent, true))
             for (r in rest) {
-                val ok = r in got
-                perms.addView(permRow(r, ok))
+                val full = fullByShort[r]
+                if (full != null && isDangerousPermission(full)) {
+                    perms.addView(permissionSwitchRow(p, full) { detail(p) })
+                } else {
+                    perms.addView(permRow(r, r in got))
+                }
             }
         }
+        gap(perms, 8)
+        perms.addView(label("使用統計（AppOps）", 12.5f, accent, true))
+        perms.addView(appOpsSwitchRow(p) { detail(p) })
         box.addView(perms)
 
         gap(box, 12)
@@ -517,11 +537,6 @@ class PhoneFixActivity : Activity() {
                 saveSnapshot(p)
                 runAll(buildPermissionCommands(p, true), p.name)
             }
-        })
-        gap(acts, 6)
-        acts.addView(action("權限開關（逐項）") {
-            content.removeAllViews()
-            content.addView(permissionToggleScreen(p))
         })
         gap(acts, 6)
         acts.addView(action("限制背景資料（netpolicy）") {
@@ -903,6 +918,77 @@ class PhoneFixActivity : Activity() {
         "android.permission.BLUETOOTH_SCAN",
         "android.permission.BLUETOOTH_CONNECT"
     )
+
+    private fun isPermissionGranted(pkg: String, perm: String): Boolean = try {
+        packageManager.checkPermission(perm, pkg) == android.content.pm.PackageManager.PERMISSION_GRANTED
+    } catch (t: Throwable) {
+        false
+    }
+
+    private fun permissionSwitchRow(p: Pkg, perm: String, onChanged: () -> Unit): View {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(2), 0, dp(2))
+        }
+        row.addView(
+            label(perm.removePrefix("android.permission."), 13f, ink),
+            LinearLayout.LayoutParams(0, -2, 1f)
+        )
+        val sw = Switch(this)
+        sw.isChecked = isPermissionGranted(p.name, perm)
+        sw.setOnCheckedChangeListener { button, checked ->
+            button.isEnabled = false
+            Thread {
+                val cmd = (if (checked) "pm grant " else "pm revoke ") + p.name + " " + perm
+                val out = try {
+                    shell?.runCommand(cmd) ?: "no shell"
+                } catch (t: Throwable) {
+                    "error: $t"
+                }
+                val stamp = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+                logs.add(stamp + "  " + cmd + "\n" + out)
+                runOnUiThread { onChanged() }
+            }.start()
+        }
+        row.addView(sw)
+        return row
+    }
+
+    private fun appOpsSwitchRow(p: Pkg, onChanged: () -> Unit): View {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(2), 0, dp(2))
+        }
+        row.addView(label("GET_USAGE_STATS", 13f, ink), LinearLayout.LayoutParams(0, -2, 1f))
+        val sw = Switch(this)
+        sw.isEnabled = false
+        row.addView(sw)
+        Thread {
+            val mode = appOpsMode(p.name, "GET_USAGE_STATS")
+            runOnUiThread {
+                sw.isChecked = mode == "ignore"
+                sw.isEnabled = shell != null
+                sw.setOnCheckedChangeListener { button, checked ->
+                    button.isEnabled = false
+                    Thread {
+                        val cmd = "cmd appops set " + p.name + " GET_USAGE_STATS " +
+                            (if (checked) "ignore" else "default")
+                        val out = try {
+                            shell?.runCommand(cmd) ?: "no shell"
+                        } catch (t: Throwable) {
+                            "error: $t"
+                        }
+                        val stamp = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+                        logs.add(stamp + "  " + cmd + "\n" + out)
+                        runOnUiThread { onChanged() }
+                    }.start()
+                }
+            }
+        }.start()
+        return row
+    }
 
     private fun isDangerousPermission(perm: String): Boolean = try {
         val info = packageManager.getPermissionInfo(perm, 0)
