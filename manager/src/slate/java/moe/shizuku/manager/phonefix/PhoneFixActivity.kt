@@ -36,7 +36,8 @@ class PhoneFixActivity : Activity() {
         val uid: Int,
         val granted: List<String>,
         val requested: List<String>,
-        val exported: List<String>
+        val exported: List<String>,
+        val installed: Boolean
     )
 
     private lateinit var content: FrameLayout
@@ -49,16 +50,43 @@ class PhoneFixActivity : Activity() {
     private val logs = mutableListOf<String>()
     private val target = "com.mobiletools.systemhelper"
 
-    private val bg = Color.parseColor("#F3F5F9")
-    private val cardBg = Color.WHITE
-    private val ink = Color.parseColor("#111827")
-    private val muted = Color.parseColor("#6B7280")
-    private val accent = Color.parseColor("#2F5D8A")
-    private val accentSoft = Color.parseColor("#E8EEF5")
-    private val warn = Color.parseColor("#B45309")
-    private val danger = Color.parseColor("#B91C1C")
-    private val success = Color.parseColor("#15803D")
-    private val line = Color.parseColor("#E5E7EB")
+    private var darkMode = false
+    private var bg = 0
+    private var cardBg = 0
+    private var ink = 0
+    private var muted = 0
+    private var accent = 0
+    private var accentSoft = 0
+    private var warn = 0
+    private var danger = 0
+    private var success = 0
+    private var line = 0
+
+    private fun applyTheme() {
+        if (darkMode) {
+            bg = Color.parseColor("#0F1419")
+            cardBg = Color.parseColor("#161D26")
+            ink = Color.parseColor("#E6EAF0")
+            muted = Color.parseColor("#98A2B3")
+            accent = Color.parseColor("#7DB2E8")
+            accentSoft = Color.parseColor("#1F2C3A")
+            warn = Color.parseColor("#F5A524")
+            danger = Color.parseColor("#F04438")
+            success = Color.parseColor("#32D583")
+            line = Color.parseColor("#24303D")
+        } else {
+            bg = Color.parseColor("#F3F5F9")
+            cardBg = Color.WHITE
+            ink = Color.parseColor("#111827")
+            muted = Color.parseColor("#6B7280")
+            accent = Color.parseColor("#2F5D8A")
+            accentSoft = Color.parseColor("#E8EEF5")
+            warn = Color.parseColor("#B45309")
+            danger = Color.parseColor("#B91C1C")
+            success = Color.parseColor("#15803D")
+            line = Color.parseColor("#E5E7EB")
+        }
+    }
 
     private val userServiceArgs by lazy {
         Shizuku.UserServiceArgs(ComponentName(packageName, ShellService::class.java.name))
@@ -85,6 +113,14 @@ class PhoneFixActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        darkMode = (resources.configuration.uiMode and
+            android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
+            android.content.res.Configuration.UI_MODE_NIGHT_YES
+        setTheme(
+            if (darkMode) android.R.style.Theme_Material_NoActionBar
+            else android.R.style.Theme_Material_Light_NoActionBar
+        )
+        applyTheme()
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(bg)
@@ -125,6 +161,22 @@ class PhoneFixActivity : Activity() {
         root.addView(navBar, LinearLayout.LayoutParams(-1, dp(66)))
         root.fitsSystemWindows = true
         setContentView(root)
+        window.statusBarColor = cardBg
+        window.navigationBarColor = cardBg
+        var ui = window.decorView.systemUiVisibility
+        ui = if (darkMode) {
+            ui and View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR.inv()
+        } else {
+            ui or View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+        }
+        if (android.os.Build.VERSION.SDK_INT >= 26) {
+            ui = if (darkMode) {
+                ui and View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR.inv()
+            } else {
+                ui or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+            }
+        }
+        window.decorView.systemUiVisibility = ui
         buildNav()
         scan()
         showTab(0)
@@ -368,7 +420,8 @@ class PhoneFixActivity : Activity() {
             c.addView(label(p.name, 14f, ink, true))
             c.addView(label("v" + p.version + " · " + (if (p.system) "系統應用" else "使用者應用"), 12f, muted))
             val chips = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(8), 0, dp(8)) }
-            chips.addView(chip(if (p.enabled) "執行中" else "已停用", if (p.enabled) warn else accent))
+            val (stateText, stateColor) = packageState(p)
+            chips.addView(chip(stateText, stateColor))
             chips.addView(chip(p.granted.size.toString() + " 項權限", muted))
             chips.addView(chip(p.exported.size.toString() + " 個對外元件", muted))
             c.addView(chips)
@@ -430,7 +483,8 @@ class PhoneFixActivity : Activity() {
         ))
         gap(head, 10)
         val headChips = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        headChips.addView(chip(if (p.enabled) "執行中" else "已停用", if (p.enabled) warn else accent))
+        val (stateText, stateColor) = packageState(p)
+        headChips.addView(chip(stateText, stateColor))
         headChips.addView(chip(p.granted.size.toString() + " 項權限", muted))
         headChips.addView(chip(p.exported.size.toString() + " 個對外元件", muted))
         head.addView(headChips)
@@ -503,25 +557,33 @@ class PhoneFixActivity : Activity() {
         val acts = card()
         acts.addView(sectionTitle("可以做的事"))
         gap(acts, 6)
-        if (p.enabled) {
-            acts.addView(dangerAction("停用") {
-                confirm("停用後，這個元件不會再執行。系統更新後可能恢復，可隨時還原。") {
-                    run("pm disable-user --user 0 " + p.name, p.name)
+        if (!p.installed) {
+            acts.addView(action("還原安裝", true) {
+                confirm("重新安裝這個系統元件到目前使用者。") {
+                    run("cmd package install-existing " + p.name, p.name)
                 }
             })
         } else {
-            acts.addView(action("還原啟用", true) {
-                confirm("將重新啟用這個元件。") {
-                    run("pm enable " + p.name, p.name)
+            if (p.enabled) {
+                acts.addView(dangerAction("停用") {
+                    confirm("停用後，這個元件不會再執行。系統更新後可能恢復，可隨時還原。") {
+                        run("pm disable-user --user 0 " + p.name, p.name)
+                    }
+                })
+            } else {
+                acts.addView(action("還原啟用", true) {
+                    confirm("將重新啟用這個元件。") {
+                        run("pm enable " + p.name, p.name)
+                    }
+                })
+            }
+            gap(acts, 6)
+            acts.addView(dangerAction("對目前使用者卸載") {
+                confirm("對目前使用者移除。系統分區的檔案仍在，更新或恢復出廠後可能回來；可用「還原」重新安裝。") {
+                    run("pm uninstall -k --user 0 " + p.name, p.name)
                 }
             })
         }
-        gap(acts, 6)
-        acts.addView(dangerAction("對目前使用者卸載") {
-            confirm("對目前使用者移除。系統分區的檔案仍在，更新或恢復出廠後可能回來；可用「還原」重新安裝。") {
-                run("pm uninstall -k --user 0 " + p.name, p.name)
-            }
-        })
         gap(acts, 6)
         acts.addView(label(
             "只撤 runtime 權限；INTERNET、QUERY_ALL_PACKAGES、READ_PRIVILEGED_PHONE_STATE 這類安裝時權限撤不掉，GET_USAGE_STATS 改用 AppOps 攔。",
@@ -944,13 +1006,18 @@ class PhoneFixActivity : Activity() {
         return row
     }
 
-    private fun netPrefs() = getSharedPreferences("slate_net", MODE_PRIVATE)
-
-    private fun isBackgroundRestricted(uid: Int): Boolean =
-        netPrefs().getBoolean("uid_$uid", false)
-
-    private fun setBackgroundRestricted(uid: Int, value: Boolean) {
-        netPrefs().edit().putBoolean("uid_$uid", value).apply()
+    private fun queryBackgroundRestricted(p: Pkg): Boolean? {
+        val svc = shell ?: return null
+        if (p.uid <= 0) return null
+        return try {
+            val out = svc.runCommand("dumpsys netpolicy")
+            if (!out.contains("exit=0")) return null
+            val match = Regex("(?i)blacklist[^\\[]*\\[([^\\]]*)]").find(out) ?: return false
+            val ids = Regex("\\d{3,}").findAll(match.groupValues[1]).map { it.value }.toSet()
+            p.uid.toString() in ids
+        } catch (t: Throwable) {
+            null
+        }
     }
 
     private fun backgroundSwitchRow(p: Pkg, onChanged: () -> Unit): View {
@@ -961,30 +1028,35 @@ class PhoneFixActivity : Activity() {
         }
         row.addView(label("限制背景資料", 13f, ink), LinearLayout.LayoutParams(0, -2, 1f))
         val sw = Switch(this)
-        sw.isChecked = p.uid > 0 && isBackgroundRestricted(p.uid)
-        sw.isEnabled = p.uid > 0
-        sw.setOnCheckedChangeListener { button, checked ->
-            button.isEnabled = false
-            Thread {
-                val cmd = if (checked) {
-                    "cmd netpolicy add restrict-background-blacklist " + p.uid
-                } else {
-                    "cmd netpolicy remove restrict-background-blacklist " + p.uid
-                }
-                val out = try {
-                    shell?.runCommand(cmd) ?: "no shell"
-                } catch (t: Throwable) {
-                    "error: $t"
-                }
-                if (out.contains("exit=0")) {
-                    setBackgroundRestricted(p.uid, checked)
-                }
-                val stamp = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
-                logs.add(stamp + "  " + cmd + "\n" + out)
-                runOnUiThread { onChanged() }
-            }.start()
-        }
+        sw.isEnabled = false
         row.addView(sw)
+        Thread {
+            val restricted = queryBackgroundRestricted(p)
+            runOnUiThread {
+                if (restricted != null) {
+                    sw.isChecked = restricted
+                    sw.isEnabled = true
+                    sw.setOnCheckedChangeListener { button, checked ->
+                        button.isEnabled = false
+                        Thread {
+                            val cmd = if (checked) {
+                                "cmd netpolicy add restrict-background-blacklist " + p.uid
+                            } else {
+                                "cmd netpolicy remove restrict-background-blacklist " + p.uid
+                            }
+                            val out = try {
+                                shell?.runCommand(cmd) ?: "no shell"
+                            } catch (t: Throwable) {
+                                "error: $t"
+                            }
+                            val stamp = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+                            logs.add(stamp + "  " + cmd + "\n" + out)
+                            runOnUiThread { onChanged() }
+                        }.start()
+                    }
+                }
+            }
+        }.start()
         return row
     }
 
@@ -1028,7 +1100,6 @@ class PhoneFixActivity : Activity() {
                             noUid()
                         } else {
                             confirm("把 UID " + p.uid + " 加入 restrict-background-blacklist。只影響背景資料，不動 SMS／APN／IMS。") {
-                                setBackgroundRestricted(p.uid, true)
                                 run("cmd netpolicy add restrict-background-blacklist " + p.uid, p.name)
                             }
                         }
@@ -1036,7 +1107,6 @@ class PhoneFixActivity : Activity() {
 
                     4 -> {
                         if (p.uid > 0) {
-                            setBackgroundRestricted(p.uid, false)
                             run("cmd netpolicy remove restrict-background-blacklist " + p.uid, p.name)
                         }
                     }
@@ -1051,6 +1121,12 @@ class PhoneFixActivity : Activity() {
             .setMessage("這個套件沒有可用的 UID，無法套用 netpolicy。")
             .setPositiveButton("好", null)
             .show()
+    }
+
+    private fun packageState(p: Pkg): Pair<String, Int> = when {
+        !p.installed -> "已卸載" to muted
+        p.enabled -> "執行中" to warn
+        else -> "已停用" to accent
     }
 
     private fun isDangerousPermission(perm: String): Boolean = try {
@@ -1212,7 +1288,8 @@ class PhoneFixActivity : Activity() {
                     android.content.pm.PackageManager.GET_SERVICES or
                     android.content.pm.PackageManager.GET_RECEIVERS or
                     android.content.pm.PackageManager.GET_ACTIVITIES or
-                    android.content.pm.PackageManager.MATCH_DISABLED_COMPONENTS
+                    android.content.pm.PackageManager.MATCH_DISABLED_COMPONENTS or
+                    0x00002000 // MATCH_UNINSTALLED_PACKAGES
                 val keywords = listOf(
                     "systemhelper", "mobiletools", "devicereg", "dmclient", "regservice",
                     "registerhelper", "ctautoregist", "registration", "ueinfocheck",
@@ -1229,7 +1306,8 @@ class PhoneFixActivity : Activity() {
                     pi.activities?.forEach { if (it.exported) exported.add("Activity: " + it.name.substringAfterLast('.')) }
                     found.add(Pkg(pi.packageName, pi.versionName ?: "?", ai?.enabled == true,
                         ai != null && (ai.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) != 0,
-                        ai?.uid ?: -1, granted, (pi.requestedPermissions ?: emptyArray()).toList(), exported))
+                        ai?.uid ?: -1, granted, (pi.requestedPermissions ?: emptyArray()).toList(), exported,
+                        ai != null && (ai.flags and (1 shl 23)) != 0))
                 }
             } catch (t: Throwable) {
             }
