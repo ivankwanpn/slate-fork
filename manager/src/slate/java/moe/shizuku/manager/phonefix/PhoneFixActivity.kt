@@ -2,6 +2,7 @@ package moe.shizuku.manager.phonefix
 
 import android.app.Activity
 import android.app.AlertDialog
+import android.app.ProgressDialog
 import android.content.ComponentName
 import android.content.Intent
 import android.content.ServiceConnection
@@ -42,16 +43,21 @@ class PhoneFixActivity : Activity() {
     private lateinit var navBar: LinearLayout
     private var shell: IShellService? = null
     private var tab = 0
+    private var subScreen = false
     private var pkgs: List<Pkg> = emptyList()
     private val logs = mutableListOf<String>()
     private val target = "com.mobiletools.systemhelper"
 
-    private val bg = Color.parseColor("#F5F7FA")
+    private val bg = Color.parseColor("#F3F5F9")
     private val cardBg = Color.WHITE
-    private val ink = Color.parseColor("#1F2933")
-    private val muted = Color.parseColor("#6B7A8F")
-    private val accent = Color.parseColor("#3E5C76")
+    private val ink = Color.parseColor("#111827")
+    private val muted = Color.parseColor("#6B7280")
+    private val accent = Color.parseColor("#2F5D8A")
+    private val accentSoft = Color.parseColor("#E8EEF5")
     private val warn = Color.parseColor("#B45309")
+    private val danger = Color.parseColor("#B91C1C")
+    private val success = Color.parseColor("#15803D")
+    private val line = Color.parseColor("#E5E7EB")
 
     private val userServiceArgs by lazy {
         Shizuku.UserServiceArgs(ComponentName(packageName, ShellService::class.java.name))
@@ -82,19 +88,60 @@ class PhoneFixActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(bg)
         }
+
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(16), dp(20), dp(10))
+            setBackgroundColor(cardBg)
+        }
+        header.addView(label("Slate", 22f, ink, true))
+        header.addView(label("電信商元件檢查與管理", 11.5f, muted))
+        root.addView(header, LinearLayout.LayoutParams(-1, -2))
+
         content = FrameLayout(this)
         root.addView(content, LinearLayout.LayoutParams(-1, 0, 1f))
         navBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             setBackgroundColor(cardBg)
-            setPadding(dp(8), dp(6), dp(8), dp(6))
+            setPadding(dp(6), dp(6), dp(6), dp(6))
         }
-        root.addView(navBar, LinearLayout.LayoutParams(-1, dp(60)))
+        root.addView(navBar, LinearLayout.LayoutParams(-1, dp(66)))
         root.fitsSystemWindows = true
         setContentView(root)
         buildNav()
         scan()
         showTab(0)
+        showOnboarding()
+    }
+
+    private fun showOnboarding() {
+        val prefs = getSharedPreferences("slate_ui", MODE_PRIVATE)
+        if (prefs.getBoolean("onboarded", false)) return
+        AlertDialog.Builder(this)
+            .setTitle("歡迎使用 Slate")
+            .setMessage(
+                "Slate 需要官方 Shizuku 提供 shell 權限。\n\n" +
+                    "1. 安裝並啟動官方 Shizuku\n" +
+                    "2. 回到 Slate 按「授權 Slate」\n" +
+                    "3. 掃描電信商註冊／DM 元件\n" +
+                    "4. 逐項停用、撤權限、限制背景資料\n\n" +
+                    "所有操作都可逆，不需要 root。"
+            )
+            .setPositiveButton("開始") { _, _ ->
+                prefs.edit().putBoolean("onboarded", true).apply()
+            }
+            .setCancelable(false)
+            .show()
+    }
+
+    @Suppress("DEPRECATION")
+    override fun onBackPressed() {
+        if (subScreen) {
+            subScreen = false
+            showTab(1)
+        } else {
+            super.onBackPressed()
+        }
     }
 
     override fun onResume() {
@@ -126,9 +173,11 @@ class PhoneFixActivity : Activity() {
     private fun card(): LinearLayout = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
         setPadding(dp(18), dp(16), dp(18), dp(16))
+        elevation = dp(2).toFloat()
         background = GradientDrawable().apply {
-            cornerRadius = dp(16).toFloat()
+            cornerRadius = dp(20).toFloat()
             setColor(cardBg)
+            setStroke(dp(1), line)
         }
     }
 
@@ -136,13 +185,24 @@ class PhoneFixActivity : Activity() {
         Button(this).apply {
             text = t
             isAllCaps = false
-            textSize = 14f
+            textSize = 14.5f
+            minHeight = dp(46)
+            setTypeface(typeface, Typeface.BOLD)
             setTextColor(if (primary) Color.WHITE else accent)
             background = GradientDrawable().apply {
-                cornerRadius = dp(12).toFloat()
-                setColor(if (primary) accent else Color.parseColor("#E4EAF1"))
+                cornerRadius = dp(14).toFloat()
+                setColor(if (primary) accent else accentSoft)
             }
             setOnClickListener { onClick() }
+        }
+
+    private fun dangerAction(t: String, onClick: () -> Unit): Button =
+        action(t, onClick = onClick).apply {
+            setTextColor(Color.WHITE)
+            background = GradientDrawable().apply {
+                cornerRadius = dp(14).toFloat()
+                setColor(danger)
+            }
         }
 
     private fun scroll(v: View): ScrollView = ScrollView(this).apply { addView(v) }
@@ -161,22 +221,31 @@ class PhoneFixActivity : Activity() {
 
     private fun buildNav() {
         navBar.removeAllViews()
-        val items = listOf("首頁", "元件", "記錄", "設定", "說明")
-        items.forEachIndexed { i, name ->
-            val tv = TextView(this).apply {
-                text = name
+        val items = listOf(
+            "🏠" to "首頁", "📦" to "元件", "🧾" to "記錄", "⚙️" to "設定", "ℹ️" to "說明"
+        )
+        items.forEachIndexed { i, (icon, name) ->
+            val item = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
-                textSize = 13f
-                setTextColor(if (i == tab) accent else muted)
-                if (i == tab) setTypeface(typeface, Typeface.BOLD)
+                setPadding(dp(4), dp(5), dp(4), dp(5))
+                background = GradientDrawable().apply {
+                    cornerRadius = dp(14).toFloat()
+                    setColor(if (i == tab) accentSoft else Color.TRANSPARENT)
+                }
                 setOnClickListener { tab = i; showTab(i) }
             }
-            navBar.addView(tv, LinearLayout.LayoutParams(0, -1, 1f))
+            item.addView(label(icon, 17f, if (i == tab) accent else muted))
+            item.addView(label(name, 10.5f, if (i == tab) accent else muted, i == tab))
+            navBar.addView(item, LinearLayout.LayoutParams(0, -1, 1f).apply {
+                setMargins(dp(2), dp(2), dp(2), dp(2))
+            })
         }
     }
 
     private fun showTab(i: Int) {
         tab = i
+        subScreen = false
         buildNav()
         content.removeAllViews()
         content.addView(
@@ -197,9 +266,13 @@ class PhoneFixActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(18), dp(20), dp(18), dp(24))
         }
-        box.addView(label("Slate", 26f, ink, true))
-        box.addView(label("裝置元件檢查與管理", 13f, muted))
-        gap(box, 18)
+        gap(box, 4)
+        val statRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        statRow.addView(statChip("元件", pkgs.size.toString(), accent), LinearLayout.LayoutParams(0, -2, 1f).apply { setMargins(0, 0, dp(8), 0) })
+        statRow.addView(statChip("已停用", pkgs.count { !it.enabled }.toString(), warn), LinearLayout.LayoutParams(0, -2, 1f).apply { setMargins(0, 0, dp(8), 0) })
+        statRow.addView(statChip("對外元件", pkgs.sumOf { it.exported.size }.toString(), muted), LinearLayout.LayoutParams(0, -2, 1f))
+        box.addView(statRow)
+        gap(box, 14)
 
         val status = card()
         val running = try { Shizuku.pingBinder() } catch (t: Throwable) { false }
@@ -273,6 +346,26 @@ class PhoneFixActivity : Activity() {
         return scroll(box)
     }
 
+    private fun sectionTitle(t: String) = label(t, 13.5f, accent, true).apply {
+        letterSpacing = 0.02f
+    }
+
+    private fun statChip(title: String, value: String, color: Int): LinearLayout {
+        val c = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setPadding(dp(8), dp(12), dp(8), dp(12))
+            background = GradientDrawable().apply {
+                cornerRadius = dp(16).toFloat()
+                setColor(cardBg)
+                setStroke(dp(1), line)
+            }
+        }
+        c.addView(label(value, 20f, color, true))
+        c.addView(label(title, 11f, muted))
+        return c
+    }
+
     private fun chip(text: String, color: Int): TextView = TextView(this).apply {
         this.text = text
         textSize = 11f
@@ -289,18 +382,31 @@ class PhoneFixActivity : Activity() {
     }
 
     private fun detail(p: Pkg) {
+        subScreen = true
         val box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(18), dp(20), dp(18), dp(24))
+            setPadding(dp(18), dp(16), dp(18), dp(24))
         }
-        box.addView(action("‹ 返回") { showTab(1) })
+        box.addView(action("‹ 返回元件列表") { showTab(1) })
         gap(box, 12)
-        box.addView(label(p.name, 20f, ink, true))
-        box.addView(label("v" + p.version + " · " + (if (p.system) "系統應用" else "使用者應用") + " · UID " + p.uid, 12f, muted))
+
+        val head = card()
+        head.addView(label(p.name, 18f, ink, true))
+        head.addView(label(
+            "v" + p.version + " · " + (if (p.system) "系統應用" else "使用者應用") + " · UID " + p.uid,
+            12f, muted
+        ))
+        gap(head, 10)
+        val headChips = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        headChips.addView(chip(if (p.enabled) "執行中" else "已停用", if (p.enabled) warn else accent))
+        headChips.addView(chip(p.granted.size.toString() + " 項權限", muted))
+        headChips.addView(chip(p.exported.size.toString() + " 個對外元件", muted))
+        head.addView(headChips)
+        box.addView(head)
 
         gap(box, 14)
         val perms = card()
-        perms.addView(label("權限", 15f, ink, true))
+        perms.addView(sectionTitle("權限"))
         val groups = listOf(
             "定位" to listOf("ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION", "ACCESS_BACKGROUND_LOCATION", "ACCESS_MEDIA_LOCATION"),
             "電話" to listOf("READ_PHONE_STATE", "READ_PRECISE_PHONE_STATE", "READ_PRIVILEGED_PHONE_STATE", "CALL_PHONE", "READ_CALL_LOG", "READ_PHONE_NUMBERS"),
@@ -334,21 +440,29 @@ class PhoneFixActivity : Activity() {
 
         gap(box, 12)
         val exp = card()
-        exp.addView(label("對外開放的元件", 15f, ink, true))
+        exp.addView(sectionTitle("對外開放的元件"))
         exp.addView(label(if (p.exported.isEmpty()) "無" else p.exported.joinToString("\n"), 12f, if (p.exported.isEmpty()) muted else warn))
         box.addView(exp)
 
         gap(box, 12)
         val acts = card()
-        acts.addView(label("可以做的事", 15f, ink, true))
+        acts.addView(sectionTitle("可以做的事"))
         gap(acts, 6)
-        acts.addView(action(if (p.enabled) "停用" else "還原啟用") {
-            confirm(if (p.enabled) "停用後，這個元件不會再執行。系統更新後可能恢復，可隨時還原。" else "將重新啟用這個元件。") {
-                run(if (p.enabled) "pm disable-user --user 0 " + p.name else "pm enable " + p.name, p.name)
-            }
-        })
+        if (p.enabled) {
+            acts.addView(dangerAction("停用") {
+                confirm("停用後，這個元件不會再執行。系統更新後可能恢復，可隨時還原。") {
+                    run("pm disable-user --user 0 " + p.name, p.name)
+                }
+            })
+        } else {
+            acts.addView(action("還原啟用", true) {
+                confirm("將重新啟用這個元件。") {
+                    run("pm enable " + p.name, p.name)
+                }
+            })
+        }
         gap(acts, 6)
-        acts.addView(action("對目前使用者卸載") {
+        acts.addView(dangerAction("對目前使用者卸載") {
             confirm("對目前使用者移除。系統分區的檔案仍在，更新或恢復出廠後可能回來；可用「還原」重新安裝。") {
                 run("pm uninstall -k --user 0 " + p.name, p.name)
             }
@@ -572,6 +686,7 @@ class PhoneFixActivity : Activity() {
     }
 
     private fun permissionToggleScreen(p: Pkg): View {
+        subScreen = true
         val box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(18), dp(20), dp(18), dp(24))
@@ -854,20 +969,48 @@ class PhoneFixActivity : Activity() {
     private fun runAll(cmds: List<String>, pkg: String) {
         val svc = shell
         if (svc == null) {
-            showTab(0)
+            AlertDialog.Builder(this)
+                .setTitle("尚未連線")
+                .setMessage("需要先啟動官方 Shizuku 並授權 Slate，才能執行操作。")
+                .setPositiveButton("好", null)
+                .show()
             return
         }
+        val dlg = ProgressDialog(this).apply {
+            setMessage("執行中…")
+            setCancelable(false)
+            show()
+        }
         Thread {
-            val sb = StringBuilder()
+            val results = mutableListOf<String>()
+            var failures = 0
             for (c in cmds) {
-                val r = try { svc.runCommand(c) } catch (t: Throwable) { "error: " + t }
-                val short = c.replace("android.permission.", "").take(64)
-                sb.append("- ").append(short).append('\n').append("  ").append(r.trim().replace("\n", "\n  ")).append('\n')
+                val r = try {
+                    svc.runCommand(c)
+                } catch (t: Throwable) {
+                    "error: " + t
+                }
+                if (!r.contains("exit=0")) failures++
+                val short = c.replace("android.permission.", "").take(72)
+                results.add("- " + short + "\n  " + r.trim().replace("\n", "\n  "))
             }
             val stamp = SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date())
-            logs.add(stamp + "  " + pkg + "\n" + sb.toString().trim())
-            scan()
-            runOnUiThread { showTab(1) }
+            logs.add(stamp + "  " + pkg + "\n" + results.joinToString("\n"))
+            runOnUiThread {
+                try {
+                    dlg.dismiss()
+                } catch (t: Throwable) {
+                }
+                AlertDialog.Builder(this)
+                    .setTitle(if (failures == 0) "完成" else "完成，但有 " + failures + " 條失敗")
+                    .setMessage("已執行 " + cmds.size + " 條指令。")
+                    .setPositiveButton("查看記錄") { _, _ ->
+                        scan()
+                        showTab(2)
+                    }
+                    .setNegativeButton("好") { _, _ -> scan() }
+                    .show()
+            }
         }.start()
     }
 
@@ -876,33 +1019,48 @@ class PhoneFixActivity : Activity() {
     }
 
     private fun scan() {
-        val found = mutableListOf<Pkg>()
-        try {
-            val pm = packageManager
-            val flags = android.content.pm.PackageManager.GET_PERMISSIONS or
-                android.content.pm.PackageManager.GET_SERVICES or
-                android.content.pm.PackageManager.GET_RECEIVERS or
-                android.content.pm.PackageManager.GET_ACTIVITIES or
-                android.content.pm.PackageManager.MATCH_DISABLED_COMPONENTS
-            val keywords = listOf(
-                "systemhelper", "mobiletools", "devicereg", "dmclient", "regservice",
-                "registerhelper", "ctautoregist", "registration", "ueinfocheck",
-                "autoregsms", "dmreg", "guardprovider", "fanzha", "fraud"
-            )
-            for (pi in pm.getInstalledPackages(flags)) {
-                if (keywords.none { pi.packageName.contains(it, true) }) continue
-                val ai = pi.applicationInfo
-                val granted = (pi.requestedPermissions ?: emptyArray())
-                    .filter { pm.checkPermission(it, pi.packageName) == android.content.pm.PackageManager.PERMISSION_GRANTED }
-                val exported = mutableListOf<String>()
-                pi.services?.forEach { if (it.exported) exported.add("Service: " + it.name.substringAfterLast('.')) }
-                pi.receivers?.forEach { if (it.exported) exported.add("Receiver: " + it.name.substringAfterLast('.')) }
-                pi.activities?.forEach { if (it.exported) exported.add("Activity: " + it.name.substringAfterLast('.')) }
-                found.add(Pkg(pi.packageName, pi.versionName ?: "?", ai?.enabled == true,
-                    ai != null && (ai.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) != 0,
-                    ai?.uid ?: -1, granted, (pi.requestedPermissions ?: emptyArray()).toList(), exported))
+        val dlg = ProgressDialog(this).apply {
+            setMessage("掃描中…")
+            setCancelable(false)
+            show()
+        }
+        Thread {
+            val found = mutableListOf<Pkg>()
+            try {
+                val pm = packageManager
+                val flags = android.content.pm.PackageManager.GET_PERMISSIONS or
+                    android.content.pm.PackageManager.GET_SERVICES or
+                    android.content.pm.PackageManager.GET_RECEIVERS or
+                    android.content.pm.PackageManager.GET_ACTIVITIES or
+                    android.content.pm.PackageManager.MATCH_DISABLED_COMPONENTS
+                val keywords = listOf(
+                    "systemhelper", "mobiletools", "devicereg", "dmclient", "regservice",
+                    "registerhelper", "ctautoregist", "registration", "ueinfocheck",
+                    "autoregsms", "dmreg", "guardprovider", "fanzha", "fraud"
+                )
+                for (pi in pm.getInstalledPackages(flags)) {
+                    if (keywords.none { pi.packageName.contains(it, true) }) continue
+                    val ai = pi.applicationInfo
+                    val granted = (pi.requestedPermissions ?: emptyArray())
+                        .filter { pm.checkPermission(it, pi.packageName) == android.content.pm.PackageManager.PERMISSION_GRANTED }
+                    val exported = mutableListOf<String>()
+                    pi.services?.forEach { if (it.exported) exported.add("Service: " + it.name.substringAfterLast('.')) }
+                    pi.receivers?.forEach { if (it.exported) exported.add("Receiver: " + it.name.substringAfterLast('.')) }
+                    pi.activities?.forEach { if (it.exported) exported.add("Activity: " + it.name.substringAfterLast('.')) }
+                    found.add(Pkg(pi.packageName, pi.versionName ?: "?", ai?.enabled == true,
+                        ai != null && (ai.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) != 0,
+                        ai?.uid ?: -1, granted, (pi.requestedPermissions ?: emptyArray()).toList(), exported))
+                }
+            } catch (t: Throwable) {
             }
-        } catch (t: Throwable) { }
-        pkgs = found
+            runOnUiThread {
+                pkgs = found
+                try {
+                    dlg.dismiss()
+                } catch (t: Throwable) {
+                }
+                showTab(tab)
+            }
+        }.start()
     }
 }
