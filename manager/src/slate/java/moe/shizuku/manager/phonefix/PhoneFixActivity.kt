@@ -714,6 +714,20 @@ class PhoneFixActivity : Activity() {
 
     // ---------- carrier DM redirect ----------
 
+    private fun redirectPrefs() = getSharedPreferences("slate_redirect", MODE_PRIVATE)
+
+    private fun saveRedirect(url: String) {
+        redirectPrefs().edit()
+            .putString("url", url)
+            .putLong("time", System.currentTimeMillis())
+            .apply()
+    }
+
+    private fun loadRedirect(): Pair<String, Long>? {
+        val url = redirectPrefs().getString("url", null) ?: return null
+        return url to redirectPrefs().getLong("time", 0L)
+    }
+
     private fun redirectCard(): LinearLayout {
         val c = card()
         c.addView(label("上報位址（實驗性）", 15f, ink, true))
@@ -728,9 +742,32 @@ class PhoneFixActivity : Activity() {
             if (enabled) "目前狀態：可綁定" else "目前狀態：停用，請先按上面的「還原啟用」",
             12f, if (enabled) accent else warn
         ))
+
+        gap(c, 10)
+        c.addView(label("目前位址（Slate 記錄）", 12.5f, accent, true))
+        val saved = loadRedirect()
+        if (saved != null) {
+            c.addView(label(saved.first, 13f, ink, true))
+            c.addView(label(
+                "最後寫入：" + SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date(saved.second)),
+                11f, muted
+            ))
+        } else {
+            c.addView(label("尚未由 Slate 修改", 13f, muted))
+            c.addView(label("電信商預設：" + RegisterHelperClient.DEFAULT_CARRIER_URL, 11f, muted))
+        }
+        c.addView(label(
+            "非 root 無法讀取 SystemHelper 的私有 SharedPreferences；這是 Slate 上次寫入的值，其他 App 仍可能改動。",
+            11f, muted
+        ))
         gap(c, 8)
+        if (saved != null) {
+            c.addView(action("重新套用上次位址") { applyRedirect(saved.first) })
+            gap(c, 6)
+        }
+
         val input = EditText(this).apply {
-            setText(RegisterHelperClient.LOCAL_SINKHOLE_URL)
+            setText(saved?.first ?: RegisterHelperClient.LOCAL_SINKHOLE_URL)
             textSize = 13f
         }
         c.addView(input)
@@ -746,6 +783,11 @@ class PhoneFixActivity : Activity() {
             input.setText(RegisterHelperClient.DEFAULT_CARRIER_URL)
             applyRedirect(RegisterHelperClient.DEFAULT_CARRIER_URL)
         })
+        gap(c, 8)
+        c.addView(label(
+            "防篡改：這個服務 exported 且沒有權限保護，任何 App 都能改寫。Android 16 不允許 shell 只停用這個 service；非 root 只能停用整個 SystemHelper（會停止電信註冊），或每次開啟 Slate 時重新套用。真正的鎖定需要 root／LSPosed。",
+            11f, warn
+        ))
         return c
     }
 
@@ -762,6 +804,7 @@ class PhoneFixActivity : Activity() {
         confirm("將寫入 " + RegisterHelperClient.TARGET_PACKAGE + " 的 serverAddress：\n\n" + trimmed) {
             Thread {
                 val result = RegisterHelperClient.setServerAddress(this@PhoneFixActivity, trimmed)
+                if (result.ok) saveRedirect(trimmed)
                 val stamp = SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date())
                 logs.add(stamp + "  serverAddress\n" + result.message)
                 runOnUiThread { showTab(2) }
