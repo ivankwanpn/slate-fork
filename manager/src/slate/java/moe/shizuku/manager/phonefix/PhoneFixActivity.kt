@@ -15,6 +15,7 @@ import android.view.Gravity
 import android.view.View
 import android.widget.Button
 import android.widget.EditText
+import android.widget.Switch
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -372,6 +373,11 @@ class PhoneFixActivity : Activity() {
             }
         })
         gap(acts, 6)
+        acts.addView(action("權限開關（逐項）") {
+            content.removeAllViews()
+            content.addView(permissionToggleScreen(p))
+        })
+        gap(acts, 6)
         val snapshot = loadSnapshot(p)
         if (snapshot != null) {
             acts.addView(label(
@@ -522,6 +528,134 @@ class PhoneFixActivity : Activity() {
                 runOnUiThread { showTab(2) }
             }.start()
         }
+    }
+
+    // ---------- per-permission toggles ----------
+
+    private fun appOpsMode(pkg: String, op: String): String? {
+        val svc = shell ?: return null
+        return try {
+            val out = svc.runCommand("cmd appops get $pkg $op")
+            when {
+                out.contains("$op: ignore") -> "ignore"
+                out.contains("$op: allow") -> "allow"
+                out.contains("$op: default") -> "default"
+                else -> "unknown"
+            }
+        } catch (t: Throwable) {
+            null
+        }
+    }
+
+    private fun permissionToggleScreen(p: Pkg): View {
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(20), dp(18), dp(24))
+        }
+        box.addView(action("← 返回元件") { detail(p) })
+        gap(box, 12)
+        box.addView(label("權限開關", 24f, ink, true))
+        box.addView(label(
+            "逐項 grant／revoke。安裝時權限（INTERNET、QUERY_ALL_PACKAGES、READ_PRIVILEGED_PHONE_STATE 等）不在這裡，無法變更。",
+            12f, muted
+        ))
+        gap(box, 12)
+
+        val runtime = p.requested.filter { isDangerousPermission(it) }.sorted()
+        val c = card()
+        if (runtime.isEmpty()) {
+            c.addView(label("這個套件沒有可切換的 runtime 權限。", 13f, muted))
+        } else {
+            for (perm in runtime) {
+                c.addView(permissionToggleRow(p, perm))
+            }
+        }
+        box.addView(c)
+
+        gap(box, 12)
+        val usage = card()
+        usage.addView(label("使用統計（AppOps）", 15f, ink, true))
+        usage.addView(label("GET_USAGE_STATS 設為 ignore，UsageStats／NetworkStats 查詢就會回空。", 12f, muted))
+        gap(usage, 6)
+        usage.addView(appOpsToggleRow(p))
+        box.addView(usage)
+        return scroll(box)
+    }
+
+    private fun permissionToggleRow(p: Pkg, perm: String): View {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(4), 0, dp(4))
+        }
+        row.addView(
+            label(perm.removePrefix("android.permission."), 13f, ink),
+            LinearLayout.LayoutParams(0, -2, 1f)
+        )
+        val sw = Switch(this)
+        sw.isChecked = try {
+            packageManager.checkPermission(perm, p.name) ==
+                android.content.pm.PackageManager.PERMISSION_GRANTED
+        } catch (t: Throwable) {
+            false
+        }
+        sw.setOnCheckedChangeListener { button, checked ->
+            button.isEnabled = false
+            Thread {
+                val cmd = (if (checked) "pm grant " else "pm revoke ") + p.name + " " + perm
+                val out = try {
+                    shell?.runCommand(cmd) ?: "no shell"
+                } catch (t: Throwable) {
+                    "error: $t"
+                }
+                val stamp = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+                logs.add(stamp + "  " + cmd + "\n" + out)
+                runOnUiThread {
+                    content.removeAllViews()
+                    content.addView(permissionToggleScreen(p))
+                }
+            }.start()
+        }
+        row.addView(sw)
+        return row
+    }
+
+    private fun appOpsToggleRow(p: Pkg): View {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(4), 0, dp(4))
+        }
+        row.addView(label("GET_USAGE_STATS", 13f, ink), LinearLayout.LayoutParams(0, -2, 1f))
+        val sw = Switch(this)
+        sw.isEnabled = false
+        row.addView(sw)
+        Thread {
+            val mode = appOpsMode(p.name, "GET_USAGE_STATS")
+            runOnUiThread {
+                sw.isChecked = mode == "ignore"
+                sw.isEnabled = shell != null
+                sw.setOnCheckedChangeListener { button, checked ->
+                    button.isEnabled = false
+                    Thread {
+                        val cmd = "cmd appops set " + p.name + " GET_USAGE_STATS " +
+                            (if (checked) "ignore" else "default")
+                        val out = try {
+                            shell?.runCommand(cmd) ?: "no shell"
+                        } catch (t: Throwable) {
+                            "error: $t"
+                        }
+                        val stamp = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+                        logs.add(stamp + "  " + cmd + "\n" + out)
+                        runOnUiThread {
+                            content.removeAllViews()
+                            content.addView(permissionToggleScreen(p))
+                        }
+                    }.start()
+                }
+            }
+        }.start()
+        return row
     }
 
     // ---------- about ----------
