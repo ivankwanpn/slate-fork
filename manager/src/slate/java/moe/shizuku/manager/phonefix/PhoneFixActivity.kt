@@ -369,6 +369,12 @@ class PhoneFixActivity : Activity() {
                 runAll(buildPermissionCommands(p, true), p.name)
             }
         })
+        gap(acts, 6)
+        acts.addView(action("還原權限（grant + appops default）") {
+            confirm("把這個套件 requested 的 runtime 權限全部 grant 回來，AppOps 設回 default；會恢復它原本的採集能力。") {
+                runAll(buildRestoreCommands(p), p.name)
+            }
+        })
         if (p.name == "com.vivo.devicereg") {
             gap(acts, 6)
             acts.addView(label(
@@ -593,6 +599,25 @@ class PhoneFixActivity : Activity() {
         val ops = if (includeSmsBluetooth) conservativeAppOps + extraAppOps else conservativeAppOps
         for (op in ops) {
             cmds.add("cmd appops set " + p.name + " " + op + " ignore")
+        }
+        return cmds
+    }
+
+    private fun buildRestoreCommands(p: Pkg): List<String> {
+        val cmds = mutableListOf<String>()
+        val perms = p.requested.filter { isDangerousPermission(it) }.sortedBy {
+            when (it) {
+                "android.permission.ACCESS_FINE_LOCATION" -> 0
+                "android.permission.ACCESS_COARSE_LOCATION" -> 1
+                "android.permission.ACCESS_BACKGROUND_LOCATION" -> 3
+                else -> 2
+            }
+        }
+        for (perm in perms) {
+            cmds.add("pm grant " + p.name + " " + perm)
+        }
+        for (op in conservativeAppOps + extraAppOps) {
+            cmds.add("cmd appops set " + p.name + " " + op + " default")
         }
         return cmds
     }
