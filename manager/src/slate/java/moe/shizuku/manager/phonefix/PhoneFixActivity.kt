@@ -488,6 +488,9 @@ class PhoneFixActivity : Activity() {
         gap(perms, 8)
         perms.addView(label("使用統計（AppOps）", 12.5f, accent, true))
         perms.addView(appOpsSwitchRow(p) { detail(p) })
+        gap(perms, 8)
+        perms.addView(label("背景資料（netpolicy）", 12.5f, accent, true))
+        perms.addView(backgroundSwitchRow(p) { detail(p) })
         box.addView(perms)
 
         gap(box, 12)
@@ -525,65 +528,16 @@ class PhoneFixActivity : Activity() {
             11f, muted
         ))
         gap(acts, 6)
-        acts.addView(action("撤銷敏感權限（保守）") {
-            confirm("撤銷定位、電話狀態、儲存、相機、麥克風、聯絡人與使用統計；不會動 SMS／藍牙。") {
-                saveSnapshot(p)
-                runAll(buildPermissionCommands(p, false), p.name)
-            }
-        })
-        gap(acts, 6)
-        acts.addView(action("撤銷敏感權限（含 SMS／藍牙）") {
-            confirm("額外撤銷 SEND_SMS、BLUETOOTH_SCAN/CONNECT；可能影響電信自動註冊與藍牙功能。") {
-                saveSnapshot(p)
-                runAll(buildPermissionCommands(p, true), p.name)
-            }
-        })
-        gap(acts, 6)
-        acts.addView(action("限制背景資料（netpolicy）") {
-            if (p.uid <= 0) {
-                AlertDialog.Builder(this)
-                    .setTitle("沒有 UID")
-                    .setMessage("這個套件沒有可用的 UID，無法套用 netpolicy。")
-                    .setPositiveButton("好", null)
-                    .show()
-            } else {
-                confirm("把 UID " + p.uid + " 加入 restrict-background-blacklist。只影響背景資料，不動 SMS／APN／IMS；若系統不支援會顯示錯誤。") {
-                    run("cmd netpolicy add restrict-background-blacklist " + p.uid, p.name)
-                }
-            }
-        })
-        gap(acts, 6)
-        acts.addView(action("解除背景限制") {
-            if (p.uid > 0) {
-                run("cmd netpolicy remove restrict-background-blacklist " + p.uid, p.name)
-            }
-        })
-        acts.addView(label(
-            "netpolicy 只擋背景資料；未計量 Wi-Fi 可能仍放行，SMS／APN／IMS 不受影響。",
-            11f, muted
-        ))
-        gap(acts, 6)
+        acts.addView(action("進階操作（批次／網路）") { showAdvanced(p) })
         val snapshot = loadSnapshot(p)
         if (snapshot != null) {
+            gap(acts, 6)
             acts.addView(label(
                 "撤銷前快照：${snapshot.first.size} 項（" +
                     SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date(snapshot.second)) + "）",
                 11f, muted
             ))
-            gap(acts, 6)
         }
-        acts.addView(action("還原權限（grant + appops default）") {
-            val granted = snapshot?.first
-            val message = if (granted != null) {
-                "將只 grant 撤銷前已授予的 ${granted.size} 項權限，AppOps 設回 default。"
-            } else {
-                "找不到撤銷前快照，將 grant 全部 requested 的 runtime 權限（可能多授權）。"
-            }
-            confirm(message) {
-                val perms = granted ?: p.requested.filter { isDangerousPermission(it) }
-                runAll(buildRestoreCommands(p, perms), p.name)
-            }
-        })
         if (p.name == "com.vivo.devicereg") {
             gap(acts, 6)
             acts.addView(label(
@@ -988,6 +942,115 @@ class PhoneFixActivity : Activity() {
             }
         }.start()
         return row
+    }
+
+    private fun netPrefs() = getSharedPreferences("slate_net", MODE_PRIVATE)
+
+    private fun isBackgroundRestricted(uid: Int): Boolean =
+        netPrefs().getBoolean("uid_$uid", false)
+
+    private fun setBackgroundRestricted(uid: Int, value: Boolean) {
+        netPrefs().edit().putBoolean("uid_$uid", value).apply()
+    }
+
+    private fun backgroundSwitchRow(p: Pkg, onChanged: () -> Unit): View {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(2), 0, dp(2))
+        }
+        row.addView(label("限制背景資料", 13f, ink), LinearLayout.LayoutParams(0, -2, 1f))
+        val sw = Switch(this)
+        sw.isChecked = p.uid > 0 && isBackgroundRestricted(p.uid)
+        sw.isEnabled = p.uid > 0
+        sw.setOnCheckedChangeListener { button, checked ->
+            button.isEnabled = false
+            Thread {
+                val cmd = if (checked) {
+                    "cmd netpolicy add restrict-background-blacklist " + p.uid
+                } else {
+                    "cmd netpolicy remove restrict-background-blacklist " + p.uid
+                }
+                val out = try {
+                    shell?.runCommand(cmd) ?: "no shell"
+                } catch (t: Throwable) {
+                    "error: $t"
+                }
+                if (out.contains("exit=0")) {
+                    setBackgroundRestricted(p.uid, checked)
+                }
+                val stamp = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+                logs.add(stamp + "  " + cmd + "\n" + out)
+                runOnUiThread { onChanged() }
+            }.start()
+        }
+        row.addView(sw)
+        return row
+    }
+
+    private fun showAdvanced(p: Pkg) {
+        val items = arrayOf(
+            "撤銷敏感權限（保守）",
+            "撤銷敏感權限（含 SMS／藍牙）",
+            "還原權限（grant + appops default）",
+            "限制背景資料",
+            "解除背景限制"
+        )
+        AlertDialog.Builder(this)
+            .setTitle("進階操作")
+            .setItems(items) { _, which ->
+                when (which) {
+                    0 -> confirm("撤銷定位、電話狀態、儲存、相機、麥克風、聯絡人與使用統計；不會動 SMS／藍牙。") {
+                        saveSnapshot(p)
+                        runAll(buildPermissionCommands(p, false), p.name)
+                    }
+
+                    1 -> confirm("額外撤銷 SEND_SMS、BLUETOOTH_SCAN/CONNECT；可能影響電信自動註冊與藍牙功能。") {
+                        saveSnapshot(p)
+                        runAll(buildPermissionCommands(p, true), p.name)
+                    }
+
+                    2 -> {
+                        val granted = loadSnapshot(p)?.first
+                        val message = if (granted != null) {
+                            "將只 grant 撤銷前已授予的 ${granted.size} 項權限，AppOps 設回 default。"
+                        } else {
+                            "找不到撤銷前快照，將 grant 全部 requested 的 runtime 權限（可能多授權）。"
+                        }
+                        confirm(message) {
+                            val perms = granted ?: p.requested.filter { isDangerousPermission(it) }
+                            runAll(buildRestoreCommands(p, perms), p.name)
+                        }
+                    }
+
+                    3 -> {
+                        if (p.uid <= 0) {
+                            noUid()
+                        } else {
+                            confirm("把 UID " + p.uid + " 加入 restrict-background-blacklist。只影響背景資料，不動 SMS／APN／IMS。") {
+                                setBackgroundRestricted(p.uid, true)
+                                run("cmd netpolicy add restrict-background-blacklist " + p.uid, p.name)
+                            }
+                        }
+                    }
+
+                    4 -> {
+                        if (p.uid > 0) {
+                            setBackgroundRestricted(p.uid, false)
+                            run("cmd netpolicy remove restrict-background-blacklist " + p.uid, p.name)
+                        }
+                    }
+                }
+            }
+            .show()
+    }
+
+    private fun noUid() {
+        AlertDialog.Builder(this)
+            .setTitle("沒有 UID")
+            .setMessage("這個套件沒有可用的 UID，無法套用 netpolicy。")
+            .setPositiveButton("好", null)
+            .show()
     }
 
     private fun isDangerousPermission(perm: String): Boolean = try {
