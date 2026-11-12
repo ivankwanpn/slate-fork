@@ -6,6 +6,7 @@ import android.app.ProgressDialog
 import android.content.ComponentName
 import android.content.Intent
 import android.content.ServiceConnection
+import android.net.VpnService
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -48,6 +49,8 @@ class PhoneFixActivity : Activity() {
     private var tab = 0
     private var subScreen = false
     private var showSystemPerms = false
+    private var pendingVpnPkg: String? = null
+    private val VPN_REQUEST = 1001
     private lateinit var headerBack: TextView
     private var pkgs: List<Pkg> = emptyList()
     private val logs = mutableListOf<String>()
@@ -646,6 +649,10 @@ class PhoneFixActivity : Activity() {
             ))
         }
         box.addView(acts)
+        if (p.name == "com.mobiletools.systemhelper" || p.name == "com.vivo.devicereg") {
+            gap(box, 12)
+            box.addView(networkBlockCard(p))
+        }
         if (p.name == RegisterHelperClient.TARGET_PACKAGE) {
             gap(box, 12)
             box.addView(redirectCard())
@@ -713,6 +720,131 @@ class PhoneFixActivity : Activity() {
     }
 
     // ---------- carrier DM redirect ----------
+
+    private fun vpnPrefs() = getSharedPreferences("slate_vpn", MODE_PRIVATE)
+
+    private fun vpnBlocked(): MutableSet<String> =
+        (vpnPrefs().getStringSet("blocked", emptySet()) ?: emptySet()).toMutableSet()
+
+    private fun saveVpnBlocked(set: Set<String>) {
+        vpnPrefs().edit().putStringSet("blocked", set).apply()
+    }
+
+    private fun toggleNetworkBlock(p: Pkg, block: Boolean) {
+        if (!block) {
+            applyNetworkBlock(p, false)
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("會接管系統 VPN")
+            .setMessage(
+                "Android 一次只能有一個 VPN。若你正在使用代理（Clash、v2ray、WireGuard 等），" +
+                    "啟用後代理會斷線；要恢復代理必須重新啟動它。\n\n" +
+                    "仍要封鎖這個 App 的網路？"
+            )
+            .setNegativeButton("取消", null)
+            .setPositiveButton("仍要啟用") { _, _ -> applyNetworkBlock(p, true) }
+            .show()
+    }
+
+    private fun applyNetworkBlock(p: Pkg, block: Boolean) {
+        val set = vpnBlocked()
+        if (block) set.add(p.name) else set.remove(p.name)
+        saveVpnBlocked(set)
+        if (set.isEmpty()) {
+            try {
+                stopService(Intent(this, NetBlockVpnService::class.java).setAction(NetBlockVpnService.ACTION_STOP))
+            } catch (t: Throwable) {
+            }
+            detail(p)
+            return
+        }
+        val prepare = try {
+            VpnService.prepare(this)
+        } catch (t: Throwable) {
+            null
+        }
+        if (prepare != null) {
+            pendingVpnPkg = p.name
+            startActivityForResult(prepare, VPN_REQUEST)
+        } else {
+            startVpnService(set)
+            detail(p)
+        }
+    }
+
+    private fun startVpnService(pkgs: Set<String>) {
+        val intent = Intent(this, NetBlockVpnService::class.java).apply {
+            action = NetBlockVpnService.ACTION_START
+            putStringArrayListExtra(NetBlockVpnService.EXTRA_PACKAGES, ArrayList(pkgs))
+        }
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= 26) {
+                startForegroundService(intent)
+            } else {
+                startService(intent)
+            }
+        } catch (t: Throwable) {
+            logs.add(SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date()) + "  VPN start\n" + t)
+        }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != VPN_REQUEST) return
+        val pkg = pendingVpnPkg
+        pendingVpnPkg = null
+        if (resultCode == RESULT_OK) {
+            startVpnService(vpnBlocked())
+        } else if (pkg != null) {
+            val set = vpnBlocked()
+            set.remove(pkg)
+            saveVpnBlocked(set)
+            if (set.isNotEmpty() && VpnService.prepare(this) == null) {
+                startVpnService(set)
+            }
+        }
+        pkg?.let { name ->
+            pkgs.firstOrNull { it.name == name }?.let { detail(it) } ?: showTab(1)
+        }
+    }
+
+    private fun networkBlockCard(p: Pkg): LinearLayout {
+        val c = card()
+        c.addView(label("網路封鎖（VPN）", 15f, ink, true))
+        c.addView(label(
+            "只把這個 App 的流量導入本機 VPN 並丟棄，等於同時封鎖行動數據、Wi-Fi、前景與背景；其他 App 不受影響。",
+            12f, muted
+        ))
+        c.addView(label(
+            "會佔用系統唯一的 VPN 通道；平時使用代理（Clash／v2ray／WireGuard）時請保持關閉，否則代理會斷線。",
+            11f, warn
+        ))
+        gap(c, 6)
+        val blocked = vpnBlocked().contains(p.name)
+        val active = NetBlockVpnService.running
+        c.addView(label(
+            when {
+                blocked && active -> "目前：已封鎖（VPN 執行中）"
+                blocked -> "目前：已記錄，但 VPN 未執行"
+                else -> "目前：未封鎖"
+            },
+            12f, if (blocked) danger else muted
+        ))
+        gap(c, 6)
+        c.addView(action(if (blocked) "解除網路封鎖" else "封鎖這個 App 的網路", !blocked) {
+            toggleNetworkBlock(p, !blocked)
+        })
+        if (blocked && !active) {
+            gap(c, 6)
+            c.addView(action("重新啟動 VPN", true) { toggleNetworkBlock(p, true) })
+        }
+        c.addView(label(
+            "注意：會一併擋掉 IMS／VoLTE 連線，可能影響電信註冊與通話；Android 同時只能有一個 VPN。",
+            11f, warn
+        ))
+        return c
+    }
 
     private fun redirectPrefs() = getSharedPreferences("slate_redirect", MODE_PRIVATE)
 
