@@ -14,6 +14,7 @@ import android.provider.Settings
 import android.view.Gravity
 import android.view.View
 import android.widget.Button
+import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -368,6 +369,10 @@ class PhoneFixActivity : Activity() {
             }
         })
         box.addView(acts)
+        if (p.name == RegisterHelperClient.TARGET_PACKAGE) {
+            gap(box, 12)
+            box.addView(redirectCard())
+        }
         content.removeAllViews()
         content.addView(scroll(box))
     }
@@ -413,6 +418,63 @@ class PhoneFixActivity : Activity() {
         return scroll(box)
     }
 
+    // ---------- carrier DM redirect ----------
+
+    private fun redirectCard(): LinearLayout {
+        val c = card()
+        c.addView(label("上報位址（實驗性）", 15f, ink, true))
+        c.addView(label(
+            "目標 App 的 serverAddress 存在它自己的 SharedPreferences。" +
+                "寫入後跨開機保留；vivo daemon 只會改套件啟用狀態，不會清掉這個值。\n\n" +
+                "需要目標處於啟用狀態才能綁定；套用完可以再停用。", 12f, muted
+        ))
+        gap(c, 8)
+        val enabled = RegisterHelperClient.isPackageEnabled(this)
+        c.addView(label(
+            if (enabled) "目前狀態：可綁定" else "目前狀態：停用，請先按上面的「還原啟用」",
+            12f, if (enabled) accent else warn
+        ))
+        gap(c, 8)
+        val input = EditText(this).apply {
+            setText(RegisterHelperClient.LOCAL_SINKHOLE_URL)
+            textSize = 13f
+        }
+        c.addView(input)
+        gap(c, 8)
+        c.addView(action("套用這個位址", true) { applyRedirect(input.text.toString()) })
+        gap(c, 6)
+        c.addView(action("用本機黑洞") {
+            input.setText(RegisterHelperClient.LOCAL_SINKHOLE_URL)
+            applyRedirect(RegisterHelperClient.LOCAL_SINKHOLE_URL)
+        })
+        gap(c, 6)
+        c.addView(action("還原電信商位址") {
+            input.setText(RegisterHelperClient.DEFAULT_CARRIER_URL)
+            applyRedirect(RegisterHelperClient.DEFAULT_CARRIER_URL)
+        })
+        return c
+    }
+
+    private fun applyRedirect(url: String) {
+        val trimmed = url.trim()
+        if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
+            AlertDialog.Builder(this)
+                .setTitle("位址格式")
+                .setMessage("請輸入以 http:// 或 https:// 開頭的位址。")
+                .setPositiveButton("好", null)
+                .show()
+            return
+        }
+        confirm("將寫入 " + RegisterHelperClient.TARGET_PACKAGE + " 的 serverAddress：\n\n" + trimmed) {
+            Thread {
+                val result = RegisterHelperClient.setServerAddress(this@PhoneFixActivity, trimmed)
+                val stamp = SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date())
+                logs.add(stamp + "  serverAddress\n" + result.message)
+                runOnUiThread { showTab(2) }
+            }.start()
+        }
+    }
+
     // ---------- about ----------
 
     private val nonRevocable = setOf(
@@ -441,7 +503,7 @@ class PhoneFixActivity : Activity() {
         found.addView(label("發現的問題", 15f, ink, true))
         found.addView(label(
             "1. com.mobiletools.systemhelper 是中國聯通的終端管理組件。它會讀取裝置與 SIM 識別碼、基地台、位置與已安裝應用清單，並以明文 HTTP 上報。\n\n" +
-            "2. 該元件對外開放一個沒有權限保護的 Binder 服務。任何應用程式都能連上它，改寫上報位址或觸發上報。\n\n" +
+            "2. 該元件對外開放一個沒有權限保護的 Binder 服務。任何應用程式都能連上它，改寫上報位址或觸發上報。Slate 在元件詳情頁提供「上報位址」功能，可直接改寫。\n\n" +
             "3. 它的啟用狀態由 vivo 的 daemon 在每次開機時還原。來源是 VivoDaemonService 內的 AppFilter，會依系統屬性把這個元件放進「啟用」清單。\n\n" +
             "4. 停用、卸載、暫停三種方式都會在重開機後被還原；只有權限與 AppOps 的變更會保留。", 13f, muted))
         box.addView(found)

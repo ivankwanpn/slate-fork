@@ -62,6 +62,18 @@ between starter, server and manager.
 The `api` submodule (Shizuku-API) still carries the upstream constants in `ShizukuProvider`; they are
 unused by this app. If third-party clients are added later, that submodule needs the same rename.
 
+## Carrier DM redirect (experimental)
+
+The component detail screen for `com.mobiletools.systemhelper` has an "上報位址" card. It binds the
+exported, permission-less `RegisterHelperService` and sends transaction 5 (`setServerAddress`), which
+writes the `serverAddress` key in the component's own SharedPreferences.
+
+This is a local, non-root, persistent redirect: the vendor daemon only changes the package enabled
+state, not the app's data, so the value survives reboots. The target package has to be enabled while
+the transaction is sent; it can be disabled again afterwards.
+
+Code: `RegisterHelperClient.kt` plus the card in `PhoneFixActivity.kt`.
+
 ## License
 
 Shizuku is Apache-2.0. See `LICENSE`. The added files are released under the same license.
