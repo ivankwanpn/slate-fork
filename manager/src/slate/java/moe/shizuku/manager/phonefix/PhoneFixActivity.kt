@@ -1063,11 +1063,16 @@ class PhoneFixActivity : Activity() {
         val svc = shell ?: return null
         if (p.uid <= 0) return null
         return try {
-            val out = svc.runCommand("dumpsys netpolicy")
-            if (!out.contains("exit=0")) return null
-            val match = Regex("(?i)blacklist[^\\[]*\\[([^\\]]*)]").find(out) ?: return false
-            val ids = Regex("\\d{3,}").findAll(match.groupValues[1]).map { it.value }.toSet()
-            p.uid.toString() in ids
+            val out = svc.runCommand("cmd netpolicy list restrict-background-blacklist")
+            if (out.contains("exit=0")) {
+                val body = out.substringAfter("Restrict background blacklisted UIDs:", out)
+                val ids = Regex("\\d+").findAll(body).map { it.value }.toSet()
+                p.uid.toString() in ids
+            } else {
+                val dump = svc.runCommand("dumpsys netpolicy")
+                if (!dump.contains("exit=0")) return null
+                Regex("UID=" + p.uid + " policy=1").containsMatchIn(dump)
+            }
         } catch (t: Throwable) {
             null
         }
