@@ -74,6 +74,21 @@ the transaction is sent; it can be disabled again afterwards.
 
 Code: `RegisterHelperClient.kt` plus the card in `PhoneFixActivity.kt`.
 
+## Client-only architecture (2026-11)
+
+Slate no longer bundles Shizuku. The manager/server/starter modules stay in the repository for
+reference, but `manager` now compiles `manager/src/slate` only:
+
+- app id `io.github.ivankwanpn.slate`, label `Slate`
+- requires the official Shizuku app (`moe.shizuku.privileged.api`); Slate requests
+  `moe.shizuku.manager.permission.API_V23` and receives the binder through
+  `<applicationId>.shizuku` (`SlateProvider`)
+- `ShellService` is started by official Shizuku as a user service
+- `manager/src/main` (the old bundled manager) is not part of the build
+
+The bundled-server flow could not pair over wireless debugging on the target device, which is why
+the client split was made.
+
 ## License
 
 Shizuku is Apache-2.0. See `LICENSE`. The added files are released under the same license.
