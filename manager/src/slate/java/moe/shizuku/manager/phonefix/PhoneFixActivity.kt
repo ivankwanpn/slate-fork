@@ -47,6 +47,7 @@ class PhoneFixActivity : Activity() {
     private var shell: IShellService? = null
     private var tab = 0
     private var subScreen = false
+    private var showSystemPerms = false
     private lateinit var headerBack: TextView
     private var pkgs: List<Pkg> = emptyList()
     private val logs = mutableListOf<String>()
@@ -529,38 +530,59 @@ class PhoneFixActivity : Activity() {
         val got = p.granted.map { it.substringAfterLast('.') }.toSet()
         val shown = mutableSetOf<String>()
         for ((title, keys) in groups) {
-            val rows = req.filter { it in keys }
+            val rows = req.filter { r ->
+                r in keys && fullByShort[r]?.let { isDangerousPermission(it) } == true
+            }
             if (rows.isEmpty()) continue
             shown.addAll(rows)
             perms.addView(label(title, 12.5f, accent, true))
             for (r in rows) {
-                val full = fullByShort[r]
-                if (full != null && isDangerousPermission(full)) {
-                    perms.addView(permissionSwitchRow(p, full) { detail(p) })
-                } else {
-                    perms.addView(permRow(r, r in got))
-                }
+                val full = fullByShort[r] ?: continue
+                perms.addView(permissionSwitchRow(p, full) { detail(p) })
             }
             gap(perms, 6)
         }
-        val rest = req.filter { it !in shown }
+        val rest = req.filter { r ->
+            r !in shown && fullByShort[r]?.let { isDangerousPermission(it) } == true
+        }
         if (rest.isNotEmpty()) {
             perms.addView(label("其他", 12.5f, accent, true))
             for (r in rest) {
-                val full = fullByShort[r]
-                if (full != null && isDangerousPermission(full)) {
-                    perms.addView(permissionSwitchRow(p, full) { detail(p) })
-                } else {
-                    perms.addView(permRow(r, r in got))
-                }
+                val full = fullByShort[r] ?: continue
+                perms.addView(permissionSwitchRow(p, full) { detail(p) })
             }
         }
+
         gap(perms, 8)
-        perms.addView(label("使用統計（AppOps）", 12.5f, accent, true))
+        perms.addView(label("使用統計", 12.5f, accent, true))
         perms.addView(appOpsSwitchRow(p) { detail(p) })
         gap(perms, 8)
-        perms.addView(label("背景資料（netpolicy）", 12.5f, accent, true))
+        perms.addView(label("背景資料", 12.5f, accent, true))
         perms.addView(backgroundSwitchRow(p) { detail(p) })
+
+        val systemPerms = req.filter { r ->
+            fullByShort[r]?.let { !isDangerousPermission(it) } == true
+        }
+        if (systemPerms.isNotEmpty()) {
+            gap(perms, 8)
+            val systemBox = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                visibility = if (showSystemPerms) View.VISIBLE else View.GONE
+            }
+            for (r in systemPerms) systemBox.addView(permRow(r, r in got))
+            val toggle = action(if (showSystemPerms) "隱藏系統授予的權限" else "顯示系統授予的權限（" + systemPerms.size + "）") { }
+            toggle.setOnClickListener {
+                showSystemPerms = !showSystemPerms
+                systemBox.visibility = if (showSystemPerms) View.VISIBLE else View.GONE
+                toggle.text = if (showSystemPerms) {
+                    "隱藏系統授予的權限"
+                } else {
+                    "顯示系統授予的權限（" + systemPerms.size + "）"
+                }
+            }
+            perms.addView(toggle)
+            perms.addView(systemBox)
+        }
         box.addView(perms)
 
         gap(box, 12)
@@ -963,12 +985,16 @@ class PhoneFixActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(0, dp(2), 0, dp(2))
         }
+        val granted = isPermissionGranted(p.name, perm)
         row.addView(
             label(perm.removePrefix("android.permission."), 13f, ink),
             LinearLayout.LayoutParams(0, -2, 1f)
         )
+        val status = label(if (granted) "已授予" else "已撤銷", 11f, if (granted) warn else success)
+        status.setPadding(0, 0, dp(8), 0)
+        row.addView(status)
         val sw = Switch(this)
-        sw.isChecked = isPermissionGranted(p.name, perm)
+        sw.isChecked = granted
         sw.setOnCheckedChangeListener { button, checked ->
             button.isEnabled = false
             Thread {
@@ -993,29 +1019,40 @@ class PhoneFixActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(0, dp(2), 0, dp(2))
         }
-        row.addView(label("GET_USAGE_STATS", 13f, ink), LinearLayout.LayoutParams(0, -2, 1f))
+        row.addView(label("允許使用統計", 13f, ink), LinearLayout.LayoutParams(0, -2, 1f))
+        val status = label("查詢中…", 11f, muted)
+        status.setPadding(0, 0, dp(8), 0)
+        row.addView(status)
         val sw = Switch(this)
         sw.isEnabled = false
         row.addView(sw)
         Thread {
             val mode = appOpsMode(p.name, "GET_USAGE_STATS")
             runOnUiThread {
-                sw.isChecked = mode == "ignore"
-                sw.isEnabled = shell != null
-                sw.setOnCheckedChangeListener { button, checked ->
-                    button.isEnabled = false
-                    Thread {
-                        val cmd = "cmd appops set " + p.name + " GET_USAGE_STATS " +
-                            (if (checked) "ignore" else "default")
-                        val out = try {
-                            shell?.runCommand(cmd) ?: "no shell"
-                        } catch (t: Throwable) {
-                            "error: $t"
-                        }
-                        val stamp = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
-                        logs.add(stamp + "  " + cmd + "\n" + out)
-                        runOnUiThread { onChanged() }
-                    }.start()
+                if (mode == null) {
+                    status.text = "查詢失敗"
+                    status.setTextColor(muted)
+                } else {
+                    val allowed = mode != "ignore"
+                    status.text = if (allowed) "已允許" else "已攔截"
+                    status.setTextColor(if (allowed) success else danger)
+                    sw.isChecked = allowed
+                    sw.isEnabled = true
+                    sw.setOnCheckedChangeListener { button, checked ->
+                        button.isEnabled = false
+                        Thread {
+                            val cmd = "cmd appops set " + p.name + " GET_USAGE_STATS " +
+                                (if (checked) "default" else "ignore")
+                            val out = try {
+                                shell?.runCommand(cmd) ?: "no shell"
+                            } catch (t: Throwable) {
+                                "error: $t"
+                            }
+                            val stamp = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+                            logs.add(stamp + "  " + cmd + "\n" + out)
+                            runOnUiThread { onChanged() }
+                        }.start()
+                    }
                 }
             }
         }.start()
@@ -1042,23 +1079,31 @@ class PhoneFixActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(0, dp(2), 0, dp(2))
         }
-        row.addView(label("限制背景資料", 13f, ink), LinearLayout.LayoutParams(0, -2, 1f))
+        row.addView(label("允許背景資料", 13f, ink), LinearLayout.LayoutParams(0, -2, 1f))
+        val status = label("查詢中…", 11f, muted)
+        status.setPadding(0, 0, dp(8), 0)
+        row.addView(status)
         val sw = Switch(this)
         sw.isEnabled = false
         row.addView(sw)
         Thread {
             val restricted = queryBackgroundRestricted(p)
             runOnUiThread {
-                if (restricted != null) {
-                    sw.isChecked = restricted
+                if (restricted == null) {
+                    status.text = "查詢失敗"
+                    status.setTextColor(muted)
+                } else {
+                    status.text = if (restricted) "已限制" else "不受限"
+                    status.setTextColor(if (restricted) danger else success)
+                    sw.isChecked = !restricted
                     sw.isEnabled = true
                     sw.setOnCheckedChangeListener { button, checked ->
                         button.isEnabled = false
                         Thread {
                             val cmd = if (checked) {
-                                "cmd netpolicy add restrict-background-blacklist " + p.uid
-                            } else {
                                 "cmd netpolicy remove restrict-background-blacklist " + p.uid
+                            } else {
+                                "cmd netpolicy add restrict-background-blacklist " + p.uid
                             }
                             val out = try {
                                 shell?.runCommand(cmd) ?: "no shell"
