@@ -44,6 +44,7 @@ class PhoneFixActivity : Activity() {
     private var shell: IShellService? = null
     private var tab = 0
     private var subScreen = false
+    private lateinit var headerBack: TextView
     private var pkgs: List<Pkg> = emptyList()
     private val logs = mutableListOf<String>()
     private val target = "com.mobiletools.systemhelper"
@@ -91,11 +92,27 @@ class PhoneFixActivity : Activity() {
 
         val header = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(16), dp(20), dp(10))
+            setPadding(dp(20), dp(14), dp(20), dp(10))
             setBackgroundColor(cardBg)
         }
-        header.addView(label("Slate", 22f, ink, true))
-        header.addView(label("電信商元件檢查與管理", 11.5f, muted))
+        val headerTop = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        headerBack = TextView(this).apply {
+            text = "‹"
+            textSize = 26f
+            setTextColor(accent)
+            setPadding(0, 0, dp(12), 0)
+            visibility = View.GONE
+            setOnClickListener { showTab(1) }
+        }
+        headerTop.addView(headerBack)
+        val titleBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        titleBox.addView(label("Slate", 22f, ink, true))
+        titleBox.addView(label("電信商元件檢查與管理", 11.5f, muted))
+        headerTop.addView(titleBox, LinearLayout.LayoutParams(0, -2, 1f))
+        header.addView(headerTop)
         root.addView(header, LinearLayout.LayoutParams(-1, -2))
 
         content = FrameLayout(this)
@@ -186,7 +203,10 @@ class PhoneFixActivity : Activity() {
             text = t
             isAllCaps = false
             textSize = 14.5f
-            minHeight = dp(46)
+            minHeight = 0
+            minimumHeight = 0
+            setPadding(dp(14), 0, dp(14), 0)
+            layoutParams = LinearLayout.LayoutParams(-1, dp(48))
             setTypeface(typeface, Typeface.BOLD)
             setTextColor(if (primary) Color.WHITE else accent)
             background = GradientDrawable().apply {
@@ -246,6 +266,7 @@ class PhoneFixActivity : Activity() {
     private fun showTab(i: Int) {
         tab = i
         subScreen = false
+        if (::headerBack.isInitialized) headerBack.visibility = View.GONE
         buildNav()
         content.removeAllViews()
         content.addView(
@@ -307,13 +328,23 @@ class PhoneFixActivity : Activity() {
         if (found.isNotEmpty()) {
             gap(summary, 8)
             for (p in found.take(3)) {
-                val row = label(p.name, 13f, ink)
-                summary.addView(row)
-                summary.addView(label("v" + p.version + " · " + (if (p.system) "系統應用" else "使用者應用") + " · " + (if (p.enabled) "執行中" else "已停用"), 12f, muted))
+                val item = LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(0, dp(4), 0, dp(4))
+                    isClickable = true
+                    setOnClickListener { detail(p) }
+                }
+                item.addView(label(p.name, 13f, ink, true))
+                item.addView(label("v" + p.version + " · " + (if (p.system) "系統應用" else "使用者應用") + " · " + (if (p.enabled) "執行中" else "已停用"), 12f, muted))
+                summary.addView(item)
             }
         }
         gap(summary, 10)
-        summary.addView(action("立即掃描") { scan(); showTab(0) })
+        summary.addView(action("立即掃描", true) { scan() })
+        if (found.isNotEmpty()) {
+            gap(summary, 6)
+            summary.addView(action("查看全部元件") { showTab(1) })
+        }
         box.addView(summary)
         return scroll(box)
     }
@@ -332,6 +363,8 @@ class PhoneFixActivity : Activity() {
         }
         for (p in pkgs) {
             val c = card()
+            c.isClickable = true
+            c.setOnClickListener { detail(p) }
             c.addView(label(p.name, 14f, ink, true))
             c.addView(label("v" + p.version + " · " + (if (p.system) "系統應用" else "使用者應用"), 12f, muted))
             val chips = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(8), 0, dp(8)) }
@@ -339,7 +372,7 @@ class PhoneFixActivity : Activity() {
             chips.addView(chip(p.granted.size.toString() + " 項權限", muted))
             chips.addView(chip(p.exported.size.toString() + " 個對外元件", muted))
             c.addView(chips)
-            c.addView(action("查看詳情") { detail(p) })
+            c.addView(label("› 查看詳情", 12f, accent, true))
             box.addView(c)
             gap(box, 12)
         }
@@ -383,12 +416,11 @@ class PhoneFixActivity : Activity() {
 
     private fun detail(p: Pkg) {
         subScreen = true
+        headerBack.visibility = View.VISIBLE
         val box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(18), dp(16), dp(18), dp(24))
         }
-        box.addView(action("‹ 返回元件列表") { showTab(1) })
-        gap(box, 12)
 
         val head = card()
         head.addView(label(p.name, 18f, ink, true))
@@ -687,12 +719,11 @@ class PhoneFixActivity : Activity() {
 
     private fun permissionToggleScreen(p: Pkg): View {
         subScreen = true
+        headerBack.visibility = View.VISIBLE
         val box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(18), dp(20), dp(18), dp(24))
         }
-        box.addView(action("← 返回元件") { detail(p) })
-        gap(box, 12)
         box.addView(label("權限開關", 24f, ink, true))
         box.addView(label(
             "逐項 grant／revoke。安裝時權限（INTERNET、QUERY_ALL_PACKAGES、READ_PRIVILEGED_PHONE_STATE 等）不在這裡，無法變更。",
