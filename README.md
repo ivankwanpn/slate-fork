@@ -1,5 +1,11 @@
 # Shizuku
 
+> **This is the Slate fork, not upstream Shizuku.**
+> Slate is a client-only component audit and management app. It requires the official Shizuku app
+> (`moe.shizuku.privileged.api`) for the shell channel.
+> See [FORK-NOTES.md](FORK-NOTES.md) and the [latest release](https://github.com/ivankwanpn/slate-fork/releases/latest).
+> Research report: <https://github.com/ivankwanpn/slate>.
+
 ## Background
 
 When developing apps that requires root, the most common method is to run some commands in the su shell. For example, there is an app that uses the `pm enable/disable` command to enable/disable components.
