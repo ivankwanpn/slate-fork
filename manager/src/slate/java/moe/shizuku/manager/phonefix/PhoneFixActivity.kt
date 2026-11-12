@@ -378,6 +378,30 @@ class PhoneFixActivity : Activity() {
             content.addView(permissionToggleScreen(p))
         })
         gap(acts, 6)
+        acts.addView(action("限制背景資料（netpolicy）") {
+            if (p.uid <= 0) {
+                AlertDialog.Builder(this)
+                    .setTitle("沒有 UID")
+                    .setMessage("這個套件沒有可用的 UID，無法套用 netpolicy。")
+                    .setPositiveButton("好", null)
+                    .show()
+            } else {
+                confirm("把 UID " + p.uid + " 加入 restrict-background-blacklist。只影響背景資料，不動 SMS／APN／IMS；若系統不支援會顯示錯誤。") {
+                    run("cmd netpolicy add restrict-background-blacklist " + p.uid, p.name)
+                }
+            }
+        })
+        gap(acts, 6)
+        acts.addView(action("解除背景限制") {
+            if (p.uid > 0) {
+                run("cmd netpolicy remove restrict-background-blacklist " + p.uid, p.name)
+            }
+        })
+        acts.addView(label(
+            "netpolicy 只擋背景資料；未計量 Wi-Fi 可能仍放行，SMS／APN／IMS 不受影響。",
+            11f, muted
+        ))
+        gap(acts, 6)
         val snapshot = loadSnapshot(p)
         if (snapshot != null) {
             acts.addView(label(
